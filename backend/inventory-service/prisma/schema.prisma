@@ -1,0 +1,50 @@
+// ==========================================
+// Prisma Schema - Inventory Service (inventory_db)
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model InventoryItem {
+  productId         String   @id
+  productName       String
+  totalStock        Int
+  reservedStock     Int      @default(0)
+  availableStock    Int
+  lowStockThreshold Int      @default(10)
+  updatedAt         DateTime @updatedAt
+
+  @@map("inventory_items")
+}
+
+model StockReservation {
+  id        String   @id @default(uuid())
+  orderId   String
+  items     Json     // Array<{ productId, quantity }>
+  status    String   @default("RESERVED")
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("stock_reservations")
+}
+
+model Event {
+  id            Int      @id @default(autoincrement())
+  eventId       String
+  type          String
+  source        String
+  correlationId String
+  payload       Json
+  timestamp     DateTime
+  storedAt      DateTime @default(now())
+
+  @@index([correlationId])
+  @@index([type])
+  @@map("events")
+}
