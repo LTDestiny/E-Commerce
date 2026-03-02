@@ -1,0 +1,43 @@
+// ==========================================
+// Prisma Schema - Shipping Service (shipping_db)
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Shipment {
+  id                String    @id @default(uuid())
+  orderId           String
+  carrier           String
+  trackingNumber    String?
+  status            String    @default("SCHEDULED")
+  estimatedDelivery DateTime?
+  actualDelivery    DateTime?
+  shippingAddress   Json      // ShippingAddress
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([orderId])
+  @@map("shipments")
+}
+
+model Event {
+  id            Int      @id @default(autoincrement())
+  eventId       String
+  type          String
+  source        String
+  correlationId String
+  payload       Json
+  timestamp     DateTime
+  storedAt      DateTime @default(now())
+
+  @@index([correlationId])
+  @@index([type])
+  @@map("events")
+}
