@@ -1,0 +1,66 @@
+stateDiagram-v2
+    [*] --> OrderPlaced: User places order
+    
+    state "Order Placed Event" as OrderPlaced {
+        [*] --> Broadcasting
+        Broadcasting --> InventoryService: Subscribe
+        Broadcasting --> PaymentService: Subscribe
+        Broadcasting --> NotificationService: Subscribe
+    }
+    
+    state ParallelProcessing {
+        state "Inventory Processing" as IP {
+            [*] --> CheckStock
+            CheckStock --> UpdateStock: Stock Available
+            CheckStock --> ReserveStock: Reserve Items
+            ReserveStock --> InventoryUpdated
+            UpdateStock --> InventoryUpdated
+        }
+        
+        state "Payment Processing" as PP {
+            [*] --> ValidatePayment
+            ValidatePayment --> ChargePayment: Valid
+            ChargePayment --> PaymentProcessed: Success
+            ChargePayment --> PaymentFailed: Failure
+        }
+    }
+    
+    OrderPlaced --> ParallelProcessing
+    
+    state "Wait for Confirmation" as WFC {
+        [*] --> WaitingInventory
+        [*] --> WaitingPayment
+        WaitingInventory --> BothCompleted: Inventory Updated
+        WaitingPayment --> BothCompleted: Payment Processed
+    }
+    
+    ParallelProcessing --> WFC
+    
+    state CompensatingTransactions {
+        PaymentFailed --> RefundInventory: Rollback
+        RefundInventory --> OrderCancelled
+        OrderCancelled --> NotifyUser: Send Cancellation
+    }
+    
+    state SuccessPath {
+        BothCompleted --> OrderConfirmed: Both Events Received
+        OrderConfirmed --> ShippingScheduled: Ship Order
+        ShippingScheduled --> NotifyUser: Send Updates
+        NotifyUser --> [*]
+    }
+    
+    WFC --> SuccessPath: Success Path
+    PP --> CompensatingTransactions: Failure Path
+    
+    note right of ParallelProcessing
+        Services work independently
+        No central orchestrator
+        Event-driven coordination
+    end note
+    
+    note right of CompensatingTransactions
+        Saga Compensation
+        - Refund inventory
+        - Cancel order
+        - Notify customer
+    end note

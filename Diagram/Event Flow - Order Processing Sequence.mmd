@@ -1,0 +1,55 @@
+sequenceDiagram
+    participant User
+    participant OS as Order Service
+    participant EB as Event Bus
+    participant IS as Inventory Service
+    participant PS as Payment Service
+    participant SS as Shipping Service
+    participant NS as Notification Service
+    
+    rect rgb(200, 230, 201)
+    Note over User,OS: 1. ORDER PLACED
+    User->>OS: Place Order
+    OS->>EB: Publish: Order Placed Event
+    Note right of EB: {orderId, userId, items}
+    end
+    
+    rect rgb(187, 222, 251)
+    Note over EB,PS: 2. PARALLEL PROCESSING
+    EB->>IS: Order Placed Event
+    EB->>PS: Order Placed Event
+    EB->>NS: Order Placed Event
+    
+    par Inventory Update
+        IS->>IS: Check & Update Stock
+        IS->>EB: Publish: Inventory Updated
+    and Payment Processing
+        PS->>PS: Process Payment
+        PS->>EB: Publish: Payment Processed
+    and User Notification
+        NS->>User: Send: Order Placed Notification
+        NS->>EB: Publish: Notification Sent
+    end
+    end
+    
+    rect rgb(255, 245, 157)
+    Note over OS,EB: 3. ORDER CONFIRMATION
+    EB->>OS: Inventory Updated Event
+    EB->>OS: Payment Processed Event
+    OS->>OS: Validate Both Events
+    OS->>EB: Publish: Order Confirmed
+    end
+    
+    rect rgb(206, 147, 216)
+    Note over EB,SS: 4. SHIPPING SCHEDULED
+    EB->>SS: Order Confirmed Event
+    SS->>SS: Schedule Shipping
+    SS->>EB: Publish: Shipping Scheduled
+    EB->>NS: Shipping Scheduled Event
+    NS->>User: Send: Shipping Details
+    end
+    
+    rect rgb(255, 204, 188)
+    Note over User,NS: 5. PROCESS COMPLETE
+    NS->>User: Send: Order Complete Notification
+    end

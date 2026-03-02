@@ -1,0 +1,67 @@
+---
+config:
+  layout: elk
+---
+flowchart TD
+    START([Order Placed Event]):::start
+    
+    START --> CHECK_INV{Inventory<br/>Available?}:::decision
+    START --> CHECK_PAY{Payment<br/>Valid?}:::decision
+    CHECK_INV -->|Yes| RESERVE[Reserve Inventory]:::success
+    CHECK_INV -->|No| INV_FAIL[Inventory Failed]:::error
+    RESERVE --> INV_SUCCESS[Emit: Inventory Updated]:::event
+    INV_FAIL --> COMP1[Compensate:<br/>Release Any Reservations]:::compensate
+    COMP1 --> CANCEL1[Cancel Order]:::cancel
+    CHECK_PAY -->|Yes| AUTHORIZE[Authorize Payment]:::success
+    CHECK_PAY -->|No| PAY_FAIL[Payment Failed]:::error
+    AUTHORIZE --> CHARGE{Charge<br/>Successful?}:::decision
+    CHARGE -->|Yes| PAY_SUCCESS[Emit: Payment Processed]:::event
+    CHARGE -->|No| PAY_FAIL
+    PAY_FAIL --> COMP2[Compensate:<br/>Release Inventory]:::compensate
+    COMP2 --> CANCEL2[Cancel Order]:::cancel
+    INV_SUCCESS --> WAIT{Both Events<br/>Received?}:::decision
+    PAY_SUCCESS --> WAIT
+    
+    WAIT -->|Yes| CONFIRM[Confirm Order]:::success
+    WAIT -->|Timeout| TIMEOUT[Order Timeout]:::error
+    TIMEOUT --> COMP3[Compensate:<br/>Refund Payment<br/>Release Inventory]:::compensate
+    COMP3 --> CANCEL3[Cancel Order]:::cancel
+    CONFIRM --> SHIP[Schedule Shipping]:::success
+    SHIP --> SHIP_FAIL{Shipping<br/>Failed?}:::decision
+    
+    SHIP_FAIL -->|Yes| COMP4[Compensate:<br/>Refund Payment<br/>Return Inventory]:::compensate
+    SHIP_FAIL -->|No| SHIPPED[Order Shipped]:::success
+    COMP4 --> CANCEL4[Cancel Order]:::cancel
+    SHIPPED --> DELIVER{Delivery<br/>Successful?}:::decision
+    DELIVER -->|Yes| COMPLETE([Order Completed]):::complete
+    DELIVER -->|No| RETRY_CHECK{Retry<br/>Attempts?}:::decision
+    
+    RETRY_CHECK -->|Less than 3| RESHIP[Reschedule Delivery]:::retry
+    RETRY_CHECK -->|3 or more| COMP5[Compensate:<br/>Full Refund<br/>Return to Inventory]:::compensate
+    RESHIP --> DELIVER
+    COMP5 --> FAILED([Order Failed]):::failed
+    CANCEL1 --> NOTIFY1[Notify Customer:<br/>Out of Stock]:::notification
+    CANCEL2 --> NOTIFY2[Notify Customer:<br/>Payment Failed]:::notification
+    CANCEL3 --> NOTIFY3[Notify Customer:<br/>Order Timeout]:::notification
+    CANCEL4 --> NOTIFY4[Notify Customer:<br/>Shipping Failed]:::notification
+    COMPLETE --> NOTIFY5[Notify Customer:<br/>Order Delivered]:::notification
+    FAILED --> NOTIFY6[Notify Customer:<br/>Delivery Failed]:::notification
+    
+    NOTIFY1 --> END1([End]):::endnode
+    NOTIFY2 --> END2([End]):::endnode
+    NOTIFY3 --> END3([End]):::endnode
+    NOTIFY4 --> END4([End]):::endnode
+    NOTIFY5 --> END5([End]):::endnode
+    NOTIFY6 --> END6([End]):::endnode
+    classDef start fill:#4CAF50,stroke:#2E7D32,stroke-width:3px,color:#fff
+    classDef decision fill:#FF9800,stroke:#E65100,stroke-width:2px,color:#fff
+    classDef success fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef error fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff
+    classDef event fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef compensate fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef cancel fill:#E91E63,stroke:#880E4F,stroke-width:2px,color:#fff
+    classDef retry fill:#FFC107,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef notification fill:#00BCD4,stroke:#006064,stroke-width:2px,color:#fff
+    classDef complete fill:#4CAF50,stroke:#1B5E20,stroke-width:3px,color:#fff
+    classDef failed fill:#F44336,stroke:#B71C1C,stroke-width:3px,color:#fff
+    classDef endnode fill:#607D8B,stroke:#263238,stroke-width:2px,color:#fff

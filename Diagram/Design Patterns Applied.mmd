@@ -1,0 +1,123 @@
+---
+config:
+  layout: elk
+---
+graph TB
+    subgraph "1. Publish-Subscribe Pattern"
+        direction LR
+        PUB[Publisher<br/>Order Service]:::publisher
+        TOPIC[Topic/Channel<br/>order.placed]:::topic
+        SUB1[Subscriber<br/>Inventory]:::subscriber
+        SUB2[Subscriber<br/>Payment]:::subscriber
+        SUB3[Subscriber<br/>Notification]:::subscriber
+        
+        PUB -->|Publish| TOPIC
+        TOPIC -->|Subscribe| SUB1
+        TOPIC -->|Subscribe| SUB2
+        TOPIC -->|Subscribe| SUB3
+    end
+    
+    subgraph "2. Event Sourcing Pattern"
+        direction TB
+        CMD[Command<br/>Place Order]:::command
+        AGG[Aggregate<br/>Order]:::aggregate
+        EVT[Event<br/>Order Placed]:::event
+        EVTS[Event Store]:::store
+        PROJ[Projection<br/>Current State]:::projection
+        
+        CMD --> AGG
+        AGG -->|Emit| EVT
+        EVT -->|Append| EVTS
+        EVTS -->|Replay| PROJ
+    end
+    
+    subgraph "3. Idempotency Pattern"
+        direction LR
+        REQ1[Request 1<br/>eventId: ABC123]:::request
+        REQ2[Request 2<br/>eventId: ABC123]:::request
+        IDMP[Idempotency Check]:::check
+        PROC[Process Once]:::process
+        CACHE[Idempotency Cache]:::cache
+        
+        REQ1 --> IDMP
+        REQ2 --> IDMP
+        IDMP -->|First Time| PROC
+        IDMP -.->|Duplicate| CACHE
+        PROC -->|Store| CACHE
+    end
+    
+    subgraph "4. Dead Letter Queue Pattern"
+        direction TB
+        MSG[Incoming Message]:::message
+        RETRY_LOGIC[Retry Logic<br/>Max 3 attempts]:::retry
+        SUCCESS[Process Success]:::success
+        DLQ_QUEUE[Dead Letter Queue]:::dlq
+        ALERT[Alert/Monitor]:::alert
+        
+        MSG --> RETRY_LOGIC
+        RETRY_LOGIC -->|Success| SUCCESS
+        RETRY_LOGIC -->|Max Retries| DLQ_QUEUE
+        DLQ_QUEUE --> ALERT
+    end
+    
+    subgraph "5. Circuit Breaker Pattern"
+        direction LR
+        CALL_SVC[Service Call]:::callsvc
+        BREAKER[Circuit Breaker]:::breaker
+        CLOSED[Closed State<br/>Normal Operation]:::closed
+        OPEN[Open State<br/>Fail Fast]:::open
+        HALF[Half-Open<br/>Test Recovery]:::half
+        
+        CALL_SVC --> BREAKER
+        BREAKER --> CLOSED
+        CLOSED -->|Failures exceed Threshold| OPEN
+        OPEN -->|Timeout| HALF
+        HALF -->|Success| CLOSED
+        HALF -->|Failure| OPEN
+    end
+    
+    subgraph "6. CQRS Pattern"
+        direction TB
+        USER_CMD[User Command]:::user
+        WRITE[Write Model<br/>Command Handler]:::write
+        WRITE_DB[(Write DB)]:::writedb
+        EVENT_BUS[Event Bus]:::bus
+        READ[Read Model<br/>Query Handler]:::read
+        READ_DB[(Read DB)]:::readdb
+        USER_QRY[User Query]:::user
+        
+        USER_CMD --> WRITE
+        WRITE --> WRITE_DB
+        WRITE -->|Publish Events| EVENT_BUS
+        EVENT_BUS -->|Update| READ
+        READ --> READ_DB
+        USER_QRY --> READ
+    end
+    classDef publisher fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef topic fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    classDef subscriber fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef command fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef aggregate fill:#00BCD4,stroke:#006064,stroke-width:2px,color:#fff
+    classDef event fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef store fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef projection fill:#8BC34A,stroke:#33691E,stroke-width:2px,color:#fff
+    classDef request fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef check fill:#FFC107,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef process fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef cache fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef message fill:#00BCD4,stroke:#006064,stroke-width:2px,color:#fff
+    classDef retry fill:#FF9800,stroke:#E65100,stroke-width:2px,color:#fff
+    classDef success fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef dlq fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff
+    classDef alert fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef callsvc fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef breaker fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    classDef closed fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef open fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff
+    classDef half fill:#FFC107,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef user fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef write fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef writedb fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef bus fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    classDef read fill:#00BCD4,stroke:#006064,stroke-width:2px,color:#fff
+    classDef readdb fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff

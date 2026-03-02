@@ -1,0 +1,76 @@
+---
+config:
+  layout: elk
+---
+graph LR
+    subgraph "Event Categories"
+        direction TB
+        
+        subgraph "Order Events"
+            E1[Order Placed]:::order
+            E2[Order Confirmed]:::order
+            E3[Order Cancelled]:::order
+            E4[Order Completed]:::order
+        end
+        
+        subgraph "Inventory Events"
+            E5[Inventory Updated]:::inventory
+            E6[Stock Reserved]:::inventory
+            E7[Stock Released]:::inventory
+            E8[Low Stock Alert]:::inventory
+        end
+        
+        subgraph "Payment Events"
+            E9[Payment Processed]:::payment
+            E10[Payment Failed]:::payment
+            E11[Payment Refunded]:::payment
+            E12[Payment Authorized]:::payment
+        end
+        
+        subgraph "Shipping Events"
+            E13[Shipping Scheduled]:::shipping
+            E14[Order Shipped]:::shipping
+            E15[Order Delivered]:::shipping
+            E16[Delivery Failed]:::shipping
+        end
+        
+        subgraph "Notification Events"
+            E17[Notification Sent]:::notification
+            E18[Email Delivered]:::notification
+            E19[SMS Delivered]:::notification
+            E20[Notification Failed]:::notification
+        end
+    end
+    
+    subgraph "Event Structure"
+        direction TB
+        ES[Event Schema]:::schema
+        ES --> META[Metadata<br/>- eventId<br/>- timestamp<br/>- version<br/>- correlationId]:::metadata
+        ES --> PAYLOAD[Payload<br/>- orderId<br/>- userId<br/>- items<br/>- amount<br/>- status]:::payload
+        ES --> CONTEXT[Context<br/>- source<br/>- traceId<br/>- spanId]:::context
+    end
+    E1 -.->|Triggers| E5
+    E1 -.->|Triggers| E9
+    E9 -->|Success| E2
+    E10 -->|Failure| E3
+    E2 -.->|Triggers| E13
+    E13 -.->|Triggers| E14
+    E14 -.->|Triggers| E15
+    E15 -.->|Triggers| E4
+    
+    E1 -.->|Triggers| E17
+    E2 -.->|Triggers| E17
+    E13 -.->|Triggers| E17
+    E15 -.->|Triggers| E17
+    E10 -.->|Compensate| E7
+    E10 -.->|Notify| E17
+    E3 -.->|Trigger| E11
+    classDef order fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef inventory fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef payment fill:#FF9800,stroke:#E65100,stroke-width:2px,color:#fff
+    classDef shipping fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef notification fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff
+    classDef schema fill:#00BCD4,stroke:#006064,stroke-width:3px,color:#fff
+    classDef metadata fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef payload fill:#8BC34A,stroke:#33691E,stroke-width:2px,color:#fff
+    classDef context fill:#FFC107,stroke:#F57F17,stroke-width:2px,color:#000

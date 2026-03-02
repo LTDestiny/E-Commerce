@@ -1,0 +1,51 @@
+---
+config:
+  layout: dagre
+---
+graph TB
+    subgraph "Event Producers" 
+        OS[Order Service]:::producer
+    end
+    
+    subgraph "Event Bus / Message Broker"
+        EB[Event Bus<br/>Kafka/RabbitMQ/SNS]:::broker
+    end
+    
+    subgraph "Event Consumers"
+        IS[Inventory Service]:::consumer
+        PS[Payment Service]:::consumer
+        SS[Shipping Service]:::consumer
+        NS[Notification Service]:::consumer
+    end
+    
+    subgraph "Storage Layer"
+        ES[Event Store<br/>Audit & Replay]:::storage
+        DB[(Database)]:::storage
+    end
+    
+    subgraph "External Systems"
+        PG[Payment Gateway]:::external
+        SP[Shipping Provider]:::external
+        EMAIL[Email/SMS Gateway]:::external
+    end
+    OS -->|Publish Events| EB
+    EB -->|Subscribe| IS
+    EB -->|Subscribe| PS
+    EB -->|Subscribe| SS
+    EB -->|Subscribe| NS
+    
+    IS -->|Publish Events| EB
+    PS -->|Publish Events| EB
+    SS -->|Publish Events| EB
+    NS -->|Publish Events| EB
+    
+    EB -.->|Store All Events| ES
+    IS --> DB
+    PS --> PG
+    SS --> SP
+    NS --> EMAIL
+    classDef producer fill:#4CAF50,stroke:#2E7D32,stroke-width:3px,color:#fff
+    classDef consumer fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef broker fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    classDef storage fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef external fill:#F44336,stroke:#C62828,stroke-width:2px,color:#fff

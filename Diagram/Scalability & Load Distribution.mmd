@@ -1,0 +1,129 @@
+---
+config:
+  layout: elk
+---
+graph TB
+    subgraph "Load Balancer Layer"
+        LB[Load Balancer<br/>NGINX/HAProxy]:::lb
+    end
+    
+    subgraph "Order Service Cluster"
+        OS1[Order Service<br/>Instance 1]:::service
+        OS2[Order Service<br/>Instance 2]:::service
+        OS3[Order Service<br/>Instance 3]:::service
+        OS_AUTO[Auto Scaler<br/>CPU > 70%]:::scaler
+    end
+    
+    subgraph "Inventory Service Cluster"
+        IS1[Inventory Service<br/>Instance 1]:::service
+        IS2[Inventory Service<br/>Instance 2]:::service
+        IS_AUTO[Auto Scaler<br/>Queue Depth > 100]:::scaler
+    end
+    
+    subgraph "Payment Service Cluster - High Priority"
+        PS1[Payment Service<br/>Instance 1]:::priority
+        PS2[Payment Service<br/>Instance 2]:::priority
+        PS3[Payment Service<br/>Instance 3]:::priority
+        PS4[Payment Service<br/>Instance 4]:::priority
+        PS_AUTO[Auto Scaler<br/>Response Time > 2s]:::scaler
+    end
+    
+    subgraph "Shipping Service Cluster"
+        SS1[Shipping Service<br/>Instance 1]:::service
+        SS2[Shipping Service<br/>Instance 2]:::service
+        SS_AUTO[Auto Scaler<br/>Standard]:::scaler
+    end
+    
+    subgraph "Notification Service Cluster"
+        NS1[Notification Service<br/>Instance 1]:::service
+        NS2[Notification Service<br/>Instance 2]:::service
+        NS3[Notification Service<br/>Instance 3]:::service
+        NS_AUTO[Auto Scaler<br/>Queue Depth > 200]:::scaler
+    end
+    
+    subgraph "Message Broker - Partitioned"
+        direction LR
+        PART1[Partition 1<br/>Orders 0-999]:::partition
+        PART2[Partition 2<br/>Orders 1000-1999]:::partition
+        PART3[Partition 3<br/>Orders 2000-2999]:::partition
+        PART4[Partition 4<br/>Orders 3000+]:::partition
+    end
+    
+    subgraph "Consumer Groups"
+        direction TB
+        CG1[Consumer Group:<br/>Inventory]:::consumer
+        CG2[Consumer Group:<br/>Payment]:::consumer
+        CG3[Consumer Group:<br/>Shipping]:::consumer
+        CG4[Consumer Group:<br/>Notification]:::consumer
+    end
+    
+    subgraph "Database Scaling"
+        direction LR
+        MASTER[(Master DB<br/>Write)]:::master
+        SLAVE1[(Replica 1<br/>Read)]:::replica
+        SLAVE2[(Replica 2<br/>Read)]:::replica
+        CACHE[Redis Cache<br/>Hot Data]:::cache
+    end
+    USER([High Traffic<br/>10K req/s]):::user --> LB
+    
+    LB --> OS1
+    LB --> OS2
+    LB --> OS3
+    
+    OS1 --> PART1
+    OS2 --> PART2
+    OS3 --> PART3
+    
+    PART1 --> CG1
+    PART2 --> CG1
+    PART3 --> CG1
+    PART4 --> CG1
+    
+    PART1 --> CG2
+    PART2 --> CG2
+    PART3 --> CG2
+    PART4 --> CG2
+    
+    CG1 --> IS1
+    CG1 --> IS2
+    
+    CG2 --> PS1
+    CG2 --> PS2
+    CG2 --> PS3
+    CG2 --> PS4
+    
+    PART1 --> CG3
+    CG3 --> SS1
+    CG3 --> SS2
+    
+    PART1 --> CG4
+    CG4 --> NS1
+    CG4 --> NS2
+    CG4 --> NS3
+    OS1 --> MASTER
+    IS1 --> MASTER
+    PS1 --> MASTER
+    
+    OS2 -.->|Read| SLAVE1
+    IS2 -.->|Read| SLAVE1
+    PS2 -.->|Read| SLAVE2
+    
+    OS1 -.->|Cache| CACHE
+    IS1 -.->|Cache| CACHE
+    OS_AUTO -.->|Scale Out| OS3
+    IS_AUTO -.->|Scale Out| IS2
+    PS_AUTO -.->|Scale Out| PS4
+    SS_AUTO -.->|Scale Out| SS2
+    NS_AUTO -.->|Scale Out| NS3
+    NOTE1[Peak Load Handling:<br/>- Horizontal Pod Autoscaling<br/>- Event Partitioning<br/>- Consumer Groups<br/>- Read Replicas<br/>- Caching Strategy]:::note
+    classDef user fill:#8BC34A,stroke:#33691E,stroke-width:3px,color:#fff
+    classDef lb fill:#00BCD4,stroke:#006064,stroke-width:3px,color:#fff
+    classDef service fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef priority fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#fff
+    classDef scaler fill:#9C27B0,stroke:#6A1B9A,stroke-width:2px,color:#fff
+    classDef partition fill:#FF5722,stroke:#BF360C,stroke-width:2px,color:#fff
+    classDef consumer fill:#4CAF50,stroke:#2E7D32,stroke-width:2px,color:#fff
+    classDef master fill:#F44336,stroke:#C62828,stroke-width:3px,color:#fff
+    classDef replica fill:#2196F3,stroke:#1565C0,stroke-width:2px,color:#fff
+    classDef cache fill:#FFC107,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef note fill:#607D8B,stroke:#263238,stroke-width:2px,color:#fff
