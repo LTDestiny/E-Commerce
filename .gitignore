@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+backend/postgres-data/
+backend/redis-data/
+
+# Prisma engines (large binaries)
+*.node
+
+# Package locks (keep root ones)
+# package-lock.json tracked per service
+
+# Misc
+*.log
+*.tsbuildinfo
