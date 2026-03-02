@@ -1,0 +1,44 @@
+// ==========================================
+// Prisma Schema - Payment Service (payment_db)
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  orderId        String
+  customerId     String
+  amount         Float
+  currency       String   @default("VND")
+  method         String   @default("CREDIT_CARD")
+  status         String   @default("PENDING")
+  transactionId  String?
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+model Event {
+  id            Int      @id @default(autoincrement())
+  eventId       String
+  type          String
+  source        String
+  correlationId String
+  payload       Json
+  timestamp     DateTime
+  storedAt      DateTime @default(now())
+
+  @@index([correlationId])
+  @@index([type])
+  @@map("events")
+}
