@@ -1,87 +1,108 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ShoppingCart,
-  Plus,
-  Minus,
-  Loader2,
-  CheckCircle,
-  XCircle,
-  Clock,
+  AlertCircle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  CreditCard,
+  Laptop,
+  Loader2,
+  Minus,
   Package,
+  Plus,
   RefreshCw,
+  Search,
+  ShoppingCart,
+  UserRound,
+  XCircle,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/shared/page-header";
 import {
-  ordersApi,
   inventoryApi,
-  type Order,
-  type InventoryItem,
+  ordersApi,
   type CreateOrderPayload,
+  type InventoryItem,
+  type Order,
+  type StoredEvent,
 } from "@/lib/api";
+import {
+  PRODUCT_CATALOG,
+  createCustomerId,
+  formatVND,
+  getProductMeta,
+} from "@/lib/commerce";
 
-// ==========================================
-// Constants
-// ==========================================
+type Cart = Record<string, number>;
+
 const DEFAULT_ADDRESS = {
   fullName: "Nguyễn Văn A",
   phone: "0901234567",
-  street: "123 Lê Lợi",
-  city: "Hồ Chí Minh",
-  state: "HCM",
+  street: "12 Nguyễn Văn Bảo",
+  city: "TP. Hồ Chí Minh",
+  state: "Gò Vấp",
   zipCode: "700000",
   country: "Việt Nam",
 };
 
-// ==========================================
-// Status badge styling
-// ==========================================
-function getStatusVariant(
+const categories = ["Tất cả", ...new Set(PRODUCT_CATALOG.map((p) => p.category))];
+
+function statusVariant(
   status: string,
 ): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "CONFIRMED":
-    case "COMPLETED":
-    case "DELIVERED":
-      return "default";
-    case "CANCELLED":
-    case "FAILED":
-      return "destructive";
-    case "PENDING":
-    case "PROCESSING":
-      return "secondary";
-    default:
-      return "outline";
+  if (["CONFIRMED", "COMPLETED", "DELIVERED", "SHIPPED"].includes(status)) {
+    return "default";
   }
+  if (["CANCELLED", "FAILED"].includes(status)) return "destructive";
+  if (["PENDING", "PROCESSING", "INVENTORY_RESERVED"].includes(status)) {
+    return "secondary";
+  }
+  return "outline";
 }
 
-// ==========================================
-// Orders Page
-// ==========================================
+function statusIcon(status: string) {
+  if (["CONFIRMED", "COMPLETED", "DELIVERED", "SHIPPED"].includes(status)) {
+    return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+  }
+  if (["CANCELLED", "FAILED"].includes(status)) {
+    return <XCircle className="h-4 w-4 text-red-600" />;
+  }
+  return <Loader2 className="h-4 w-4 animate-spin text-orange-600" />;
+}
+
 export default function OrdersPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [eventsByOrder, setEventsByOrder] = useState<Record<string, StoredEvent[]>>(
+    {},
+  );
+  const [cart, setCart] = useState<Cart>({});
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("Tất cả");
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [placing, setPlacing] = useState(false);
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [apiMessage, setApiMessage] = useState<string | null>(null);
+  const [customer, setCustomer] = useState({
+    name: DEFAULT_ADDRESS.fullName,
+    phone: DEFAULT_ADDRESS.phone,
+    street: DEFAULT_ADDRESS.street,
+    city: DEFAULT_ADDRESS.city,
+  });
 
-  // Fetch data
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -91,6 +112,7 @@ export default function OrdersPage() {
       ]);
       setInventory(inv);
       setOrders(ords);
+      setApiMessage(inv.length === 0 ? "Backend chưa chạy hoặc chưa seed kho." : null);
     } finally {
       setLoading(false);
     }
@@ -98,255 +120,365 @@ export default function OrdersPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Auto-refresh
-    return () => clearInterval(interval);
+    const interval = window.setInterval(fetchData, 5000);
+    return () => window.clearInterval(interval);
   }, [fetchData]);
 
-  // Cart helpers
-  const addToCart = (productId: string) => {
-    setCart((prev) => ({ ...prev, [productId]: (prev[productId] || 0) + 1 }));
-  };
+  const catalog = useMemo(() => {
+    const stockById = new Map(inventory.map((item) => [item.productId, item]));
+    return PRODUCT_CATALOG.map((product) => ({
+      ...product,
+      stock: stockById.get(product.id),
+    })).filter((product) => {
+      const matchesCategory = category === "Tất cả" || product.category === category;
+      const matchesQuery = product.name.toLowerCase().includes(query.toLowerCase());
+      return matchesCategory && matchesQuery;
+    });
+  }, [category, inventory, query]);
 
-  const removeFromCart = (productId: string) => {
+  const cartItems = useMemo(
+    () =>
+      Object.entries(cart)
+        .map(([productId, quantity]) => {
+          const product = getProductMeta(productId);
+          const stock = inventory.find((item) => item.productId === productId);
+          return { ...product, quantity, stock };
+        })
+        .filter((item) => item.quantity > 0),
+    [cart, inventory],
+  );
+
+  const cartTotal = cartItems.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
+  );
+  const cartCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const updateCart = (productId: string, delta: number) => {
     setCart((prev) => {
-      const val = (prev[productId] || 0) - 1;
-      if (val <= 0) {
+      const current = prev[productId] ?? 0;
+      const next = Math.max(0, current + delta);
+      if (next === 0) {
         const copy = { ...prev };
         delete copy[productId];
         return copy;
       }
-      return { ...prev, [productId]: val };
+      return { ...prev, [productId]: next };
     });
   };
 
-  const cartTotal = Object.entries(cart).reduce((sum, [pid, qty]) => {
-    const item = inventory.find((i) => i.productId === pid);
-    // Use a default price mapped from product names
-    const price = getProductPrice(item?.productName || "");
-    return sum + price * qty;
-  }, 0);
-
-  const cartItemCount = Object.values(cart).reduce((s, q) => s + q, 0);
-
-  // Place order
   const placeOrder = async () => {
-    if (cartItemCount === 0) return;
+    if (cartItems.length === 0) return;
     setPlacing(true);
+    setApiMessage(null);
     try {
-      const items = Object.entries(cart).map(([productId, quantity]) => {
-        const inv = inventory.find((i) => i.productId === productId);
-        const name = inv?.productName || productId;
-        const price = getProductPrice(name);
-        return {
-          productId,
-          productName: name,
-          quantity,
-          unitPrice: price,
-        };
-      });
-
       const payload: CreateOrderPayload = {
-        customerId: `CUST-${Date.now().toString(36).toUpperCase()}`,
-        items,
-        shippingAddress: DEFAULT_ADDRESS,
+        customerId: createCustomerId(),
+        items: cartItems.map((item) => ({
+          productId: item.id,
+          productName: item.name,
+          quantity: item.quantity,
+          unitPrice: item.price,
+        })),
+        shippingAddress: {
+          fullName: customer.name,
+          phone: customer.phone,
+          street: customer.street,
+          city: customer.city,
+          state: DEFAULT_ADDRESS.state,
+          zipCode: DEFAULT_ADDRESS.zipCode,
+          country: DEFAULT_ADDRESS.country,
+        },
       };
-
-      await ordersApi.create(payload);
+      const order = await ordersApi.create(payload);
       setCart({});
-      fetchData();
+      setExpandedOrder(order.id);
+      await fetchData();
+      await loadOrderEvents(order.id);
+      setApiMessage(`Đã tạo đơn ${order.id.slice(0, 8)}. Saga đang xử lý.`);
     } catch (error) {
-      console.error("Failed to place order:", error);
+      setApiMessage(
+        error instanceof Error
+          ? error.message
+          : "Không thể tạo đơn. Hãy kiểm tra backend.",
+      );
     } finally {
       setPlacing(false);
     }
   };
 
+  const loadOrderEvents = async (orderId: string) => {
+    const events = await ordersApi.getEvents(orderId).catch(() => []);
+    setEventsByOrder((prev) => ({ ...prev, [orderId]: events }));
+  };
+
+  const toggleOrder = async (orderId: string) => {
+    const next = expandedOrder === orderId ? null : orderId;
+    setExpandedOrder(next);
+    if (next && !eventsByOrder[orderId]) await loadOrderEvents(orderId);
+  };
+
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Đặt Hàng"
-        description="Chọn sản phẩm và đặt đơn hàng — theo dõi trạng thái real-time"
+        title="Mua máy tính và thiết bị công nghệ"
+        description="Catalog, giỏ hàng, checkout và theo dõi trạng thái đơn theo workflow Saga real-time."
+        icon={<Laptop className="h-6 w-6 text-primary" />}
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Product Catalog (2/3) */}
-        <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-              <div>
-                <CardTitle className="text-lg">Sản phẩm</CardTitle>
-                <CardDescription>Chọn sản phẩm để thêm vào giỏ</CardDescription>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={fetchData}
-                disabled={loading}
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-                />
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {inventory.length === 0 ? (
-                <div className="flex flex-col items-center py-12 text-muted-foreground">
-                  <Package className="mb-3 h-10 w-10" />
-                  <p>Không thể tải sản phẩm. Hãy khởi động backend!</p>
-                </div>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {inventory.map((item) => {
-                    const qty = cart[item.productId] || 0;
-                    const price = getProductPrice(item.productName);
-                    return (
-                      <motion.div
-                        key={item.productId}
-                        whileHover={{ scale: 1.01 }}
-                        className="rounded-lg border p-4"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="font-medium">{item.productName}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {formatVND(price)}
-                            </p>
-                          </div>
-                          <Badge
-                            variant={
-                              item.availableStock < 10
-                                ? "destructive"
-                                : "secondary"
-                            }
-                          >
-                            Còn {item.availableStock}
-                          </Badge>
-                        </div>
+      {apiMessage && (
+        <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{apiMessage}</span>
+        </div>
+      )}
 
-                        <div className="mt-3 flex items-center gap-2">
+      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+        <div className="space-y-5">
+          <Card className="rounded-lg">
+            <CardContent className="grid gap-3 pt-6 md:grid-cols-[1fr_auto]">
+              <div className="flex items-center gap-2 rounded-md border px-3">
+                <Search className="h-4 w-4 text-muted-foreground" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Tìm laptop, điện thoại, tai nghe..."
+                  className="h-10 w-full bg-transparent text-sm outline-none"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {categories.map((item) => (
+                  <Button
+                    key={item}
+                    variant={category === item ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCategory(item)}
+                  >
+                    {item}
+                  </Button>
+                ))}
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={fetchData}
+                  disabled={loading}
+                  title="Tải lại dữ liệu"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                  />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {catalog.map((product, index) => {
+              const quantity = cart[product.id] ?? 0;
+              const available = product.stock?.availableStock ?? 0;
+              const canAdd = product.stock ? quantity < available : false;
+
+              return (
+                <motion.div
+                  key={product.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.04 }}
+                >
+                  <Card className="h-full rounded-lg py-5">
+                    <CardContent className="space-y-4 px-5">
+                      <div className="flex gap-4">
+                        <div
+                          className={`flex h-28 w-28 shrink-0 items-center justify-center rounded-md bg-gradient-to-br ${product.accentClass}`}
+                        >
+                          <Package className="h-10 w-10 text-white" />
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <Badge variant="outline">{product.category}</Badge>
+                              <h3 className="mt-2 font-semibold leading-5">
+                                {product.name}
+                              </h3>
+                            </div>
+                            <Badge
+                              variant={
+                                available > 10
+                                  ? "secondary"
+                                  : available > 0
+                                    ? "outline"
+                                    : "destructive"
+                              }
+                            >
+                              {product.stock ? `Còn ${available}` : "Offline"}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {product.shortDescription}
+                          </p>
+                          <p className="font-bold">{formatVND(product.price)}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {product.specs.map((spec) => (
+                          <Badge key={spec} variant="secondary">
+                            {spec}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
                           <Button
                             variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            disabled={qty === 0}
-                            onClick={() => removeFromCart(item.productId)}
+                            size="icon-sm"
+                            onClick={() => updateCart(product.id, -1)}
+                            disabled={quantity === 0}
                           >
                             <Minus className="h-4 w-4" />
                           </Button>
-                          <span className="w-8 text-center font-medium">
-                            {qty}
+                          <span className="w-8 text-center font-semibold">
+                            {quantity}
                           </span>
                           <Button
                             variant="outline"
-                            size="icon"
-                            className="h-8 w-8"
-                            disabled={qty >= item.availableStock}
-                            onClick={() => addToCart(item.productId)}
+                            size="icon-sm"
+                            onClick={() => updateCart(product.id, 1)}
+                            disabled={!canAdd}
                           >
                             <Plus className="h-4 w-4" />
                           </Button>
                         </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                        <Button
+                          onClick={() => updateCart(product.id, 1)}
+                          disabled={!canAdd}
+                        >
+                          <ShoppingCart className="h-4 w-4" />
+                          Thêm
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Cart & Place Order (1/3) */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
+        <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5" />
                 Giỏ hàng
-                {cartItemCount > 0 && (
-                  <Badge variant="default">{cartItemCount}</Badge>
-                )}
+                {cartCount > 0 && <Badge>{cartCount}</Badge>}
               </CardTitle>
+              <CardDescription>
+                Đơn hàng sẽ đi qua Inventory, Payment, Shipping và Notification.
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {cartItemCount === 0 ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  Giỏ hàng trống
-                </p>
+            <CardContent className="space-y-4">
+              {cartItems.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Chưa có sản phẩm trong giỏ.
+                </div>
               ) : (
-                <>
-                  {Object.entries(cart).map(([pid, qty]) => {
-                    const inv = inventory.find((i) => i.productId === pid);
-                    const price = getProductPrice(inv?.productName || "");
-                    return (
-                      <div
-                        key={pid}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="truncate">
-                          {inv?.productName || pid} x{qty}
-                        </span>
-                        <span className="font-medium">
-                          {formatVND(price * qty)}
-                        </span>
+                <div className="space-y-3">
+                  {cartItems.map((item) => (
+                    <div key={item.id} className="flex justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {item.quantity} x {formatVND(item.price)}
+                        </p>
                       </div>
-                    );
-                  })}
+                      <p className="text-sm font-semibold">
+                        {formatVND(item.quantity * item.price)}
+                      </p>
+                    </div>
+                  ))}
                   <Separator />
-                  <div className="flex items-center justify-between font-semibold">
+                  <div className="flex justify-between font-semibold">
                     <span>Tổng cộng</span>
-                    <span className="text-primary">{formatVND(cartTotal)}</span>
+                    <span>{formatVND(cartTotal)}</span>
                   </div>
-                </>
+                </div>
               )}
 
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <UserRound className="h-4 w-4" />
+                  Thông tin giao hàng
+                </div>
+                <input
+                  value={customer.name}
+                  onChange={(e) =>
+                    setCustomer((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
+                  placeholder="Họ tên"
+                />
+                <input
+                  value={customer.phone}
+                  onChange={(e) =>
+                    setCustomer((prev) => ({ ...prev, phone: e.target.value }))
+                  }
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
+                  placeholder="Số điện thoại"
+                />
+                <input
+                  value={customer.street}
+                  onChange={(e) =>
+                    setCustomer((prev) => ({ ...prev, street: e.target.value }))
+                  }
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
+                  placeholder="Địa chỉ"
+                />
+                <input
+                  value={customer.city}
+                  onChange={(e) =>
+                    setCustomer((prev) => ({ ...prev, city: e.target.value }))
+                  }
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
+                  placeholder="Tỉnh/thành"
+                />
+              </div>
+
               <Button
-                className="w-full gap-2"
-                disabled={cartItemCount === 0 || placing}
+                className="w-full"
+                size="lg"
                 onClick={placeOrder}
+                disabled={cartItems.length === 0 || placing}
               >
                 {placing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <ShoppingCart className="h-4 w-4" />
+                  <CreditCard className="h-4 w-4" />
                 )}
-                {placing ? "Đang đặt..." : "Đặt hàng"}
+                {placing ? "Đang tạo đơn..." : "Checkout"}
               </Button>
             </CardContent>
           </Card>
-
-          {/* Shipping Address (read-only preview) */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Địa chỉ giao hàng</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              <p>{DEFAULT_ADDRESS.fullName}</p>
-              <p>{DEFAULT_ADDRESS.phone}</p>
-              <p>
-                {DEFAULT_ADDRESS.street}, {DEFAULT_ADDRESS.city}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+        </aside>
       </div>
 
-      {/* Orders List */}
-      <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+      <Card className="rounded-lg">
+        <CardHeader className="flex-row items-center justify-between space-y-0">
           <div>
-            <CardTitle className="text-lg">Danh sách đơn hàng</CardTitle>
+            <CardTitle>Đơn hàng gần đây</CardTitle>
             <CardDescription>
-              Trạng thái tự động cập nhật mỗi 5 giây
+              Mở từng đơn để xem sản phẩm và event timeline được lưu trong Event
+              Store.
             </CardDescription>
           </div>
           <Badge variant="outline">{orders.length} đơn</Badge>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="max-h-[500px]">
+          <ScrollArea className="max-h-[560px] pr-3">
             {orders.length === 0 ? (
-              <div className="flex flex-col items-center py-12 text-muted-foreground">
-                <Clock className="mb-3 h-10 w-10" />
-                <p>Chưa có đơn hàng nào</p>
+              <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
+                Chưa có đơn hàng. Hãy checkout một giỏ hàng để kích hoạt Saga.
               </div>
             ) : (
               <AnimatePresence initial={false}>
@@ -355,11 +487,8 @@ export default function OrdersPage() {
                     key={order.id}
                     order={order}
                     expanded={expandedOrder === order.id}
-                    onToggle={() =>
-                      setExpandedOrder(
-                        expandedOrder === order.id ? null : order.id,
-                      )
-                    }
+                    events={eventsByOrder[order.id] ?? []}
+                    onToggle={() => toggleOrder(order.id)}
                   />
                 ))}
               </AnimatePresence>
@@ -371,51 +500,39 @@ export default function OrdersPage() {
   );
 }
 
-// ==========================================
-// Sub-components
-// ==========================================
 function OrderRow({
   order,
   expanded,
+  events,
   onToggle,
 }: {
   order: Order;
   expanded: boolean;
+  events: StoredEvent[];
   onToggle: () => void;
 }) {
-  const statusIcon =
-    order.status === "CONFIRMED" || order.status === "COMPLETED" ? (
-      <CheckCircle className="h-4 w-4 text-green-500" />
-    ) : order.status === "CANCELLED" ? (
-      <XCircle className="h-4 w-4 text-red-500" />
-    ) : (
-      <Clock className="h-4 w-4 text-yellow-500" />
-    );
-
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="mb-2 rounded-lg border"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-3 rounded-lg border bg-card"
     >
       <button
         onClick={onToggle}
-        className="flex w-full items-center justify-between p-3 text-left hover:bg-accent/50"
+        className="flex w-full flex-col gap-3 p-4 text-left transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between"
       >
         <div className="flex items-center gap-3">
-          {statusIcon}
+          {statusIcon(order.status)}
           <div>
-            <p className="text-sm font-medium">{order.id.slice(0, 13)}...</p>
+            <p className="font-semibold">#{order.id.slice(0, 12)}</p>
             <p className="text-xs text-muted-foreground">
               {new Date(order.createdAt).toLocaleString("vi-VN")}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant={getStatusVariant(order.status)}>{order.status}</Badge>
-          <span className="text-sm font-medium">
-            {formatVND(order.totalAmount)}
-          </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant={statusVariant(order.status)}>{order.status}</Badge>
+          <span className="font-semibold">{formatVND(order.totalAmount)}</span>
           {expanded ? (
             <ChevronUp className="h-4 w-4" />
           ) : (
@@ -428,48 +545,61 @@ function OrderRow({
         <motion.div
           initial={{ height: 0, opacity: 0 }}
           animate={{ height: "auto", opacity: 1 }}
-          className="border-t px-4 py-3"
+          className="border-t p-4"
         >
-          <p className="mb-2 text-sm font-medium">Sản phẩm:</p>
-          {order.items.map((item, i) => (
-            <div key={i} className="flex justify-between text-sm">
-              <span>
-                {item.productName} × {item.quantity}
-              </span>
-              <span>{formatVND(item.unitPrice * item.quantity)}</span>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-3">
+              <p className="text-sm font-semibold">Sản phẩm</p>
+              {order.items.map((item) => (
+                <div
+                  key={`${order.id}-${item.productId}`}
+                  className="flex justify-between rounded-md border p-3 text-sm"
+                >
+                  <span>
+                    {item.productName} x {item.quantity}
+                  </span>
+                  <span className="font-medium">
+                    {formatVND(item.unitPrice * item.quantity)}
+                  </span>
+                </div>
+              ))}
+              <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
+                Giao cho {order.shippingAddress.fullName},{" "}
+                {order.shippingAddress.city}
+              </div>
             </div>
-          ))}
-          <Separator className="my-2" />
-          <div className="text-sm text-muted-foreground">
-            <p>Customer: {order.customerId}</p>
-            <p>
-              Ship to: {order.shippingAddress?.fullName},{" "}
-              {order.shippingAddress?.city}
-            </p>
+
+            <div className="space-y-3">
+              <p className="text-sm font-semibold">Event timeline</p>
+              {events.length === 0 ? (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  Chưa tải được timeline hoặc backend chưa có event cho đơn này.
+                </p>
+              ) : (
+                events.map((stored) => (
+                  <div
+                    key={stored.sequenceNumber}
+                    className="flex gap-3 rounded-md border p-3"
+                  >
+                    <div className="mt-1 h-2.5 w-2.5 rounded-full bg-primary" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {stored.event.type}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {stored.event.source} ·{" "}
+                        {new Date(stored.event.timestamp).toLocaleTimeString(
+                          "vi-VN",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </motion.div>
       )}
     </motion.div>
   );
-}
-
-// ==========================================
-// Helpers
-// ==========================================
-function getProductPrice(name: string): number {
-  const prices: Record<string, number> = {
-    "iPhone 15 Pro Max": 34990000,
-    "Samsung Galaxy S24 Ultra": 31990000,
-    "MacBook Pro M3": 49990000,
-    "AirPods Pro 2": 6790000,
-    "iPad Air M2": 18990000,
-  };
-  return prices[name] || 9990000;
-}
-
-function formatVND(amount: number): string {
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-  }).format(amount);
 }

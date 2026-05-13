@@ -1,104 +1,100 @@
-// Navigation items
 export const NAV_ITEMS = [
-  { label: "Tổng Quan", href: "/", icon: "LayoutDashboard" },
+  { label: "Cửa hàng", href: "/", icon: "LayoutDashboard" },
+  { label: "Mua hàng", href: "/orders", icon: "ShoppingCart" },
   { label: "Dashboard", href: "/dashboard", icon: "Activity" },
-  { label: "Đặt Hàng", href: "/orders", icon: "ShoppingCart" },
-  { label: "Kiến Trúc", href: "/architecture", icon: "Network" },
-  { label: "Design Patterns", href: "/patterns", icon: "Blocks" },
+  { label: "Kiến trúc", href: "/architecture", icon: "Network" },
+  { label: "Patterns", href: "/patterns", icon: "Blocks" },
   { label: "Event Flow", href: "/event-flow", icon: "Workflow" },
-  { label: "Xử Lý Lỗi", href: "/error-handling", icon: "ShieldAlert" },
-  { label: "Scalability", href: "/scalability", icon: "TrendingUp" },
+  { label: "Xử lý lỗi", href: "/error-handling", icon: "ShieldAlert" },
+  { label: "Scale", href: "/scalability", icon: "TrendingUp" },
 ] as const;
 
-// Services info
 export const SERVICES = [
   {
     name: "Order Service",
-    tech: "Java Spring Boot",
-    description: "Quản lý vòng đời đơn hàng, điều phối xử lý",
+    tech: "Node.js / Express",
+    description: "Quản lý đơn hàng và phát ORDER_PLACED để bắt đầu Saga.",
     color: "bg-blue-500",
     textColor: "text-blue-500",
     borderColor: "border-blue-500",
   },
   {
     name: "Payment Service",
-    tech: "Java Spring Boot",
-    description: "Xử lý thanh toán qua third-party gateway",
+    tech: "Node.js / Express",
+    description: "Xử lý thanh toán, idempotency và phát PAYMENT_PROCESSED.",
     color: "bg-orange-500",
     textColor: "text-orange-500",
     borderColor: "border-orange-500",
   },
   {
     name: "Inventory Service",
-    tech: "Java Spring Boot",
-    description: "Quản lý kho hàng & tồn kho",
+    tech: "Node.js / Express",
+    description: "Reserve/release tồn kho bằng transaction.",
     color: "bg-green-500",
     textColor: "text-green-500",
     borderColor: "border-green-500",
   },
   {
     name: "Shipping Service",
-    tech: "Java Spring Boot",
-    description: "Sắp xếp vận chuyển & tracking",
+    tech: "Node.js / Express",
+    description: "Lập lịch giao hàng và tracking vận chuyển.",
     color: "bg-purple-500",
     textColor: "text-purple-500",
     borderColor: "border-purple-500",
   },
   {
     name: "Notification Service",
-    tech: "Node.js",
-    description: "Gửi thông báo cho khách hàng",
+    tech: "Node.js / Express",
+    description: "Gửi thông báo mô phỏng theo từng trạng thái đơn.",
     color: "bg-red-500",
     textColor: "text-red-500",
     borderColor: "border-red-500",
   },
 ] as const;
 
-// Architecture characteristics
 export const CHARACTERISTICS = [
   {
     name: "Scalability",
     rating: 5,
-    description: "Scale từng service độc lập, horizontal scaling",
+    description: "Scale từng service độc lập theo tải thực tế.",
   },
   {
     name: "Performance",
     rating: 5,
-    description: "Bất đồng bộ, real-time, song song",
+    description: "Xử lý bất đồng bộ, song song, cập nhật real-time.",
   },
   {
     name: "Elasticity",
     rating: 5,
-    description: "Auto-scaling theo event queue depth",
+    description: "Có thể mở rộng theo độ sâu queue/event stream.",
   },
-  { name: "Evolvability", rating: 5, description: "Thêm service mới dễ dàng" },
+  { name: "Evolvability", rating: 5, description: "Dễ thêm service mới." },
   {
     name: "Availability",
     rating: 4,
-    description: "Service failure không ảnh hưởng toàn hệ thống",
+    description: "Một service lỗi không kéo sập toàn hệ thống.",
   },
   {
     name: "Fault Tolerance",
     rating: 4,
-    description: "Loose coupling, circuit breaker",
+    description: "Loose coupling, retry và bù trừ giao dịch.",
   },
   {
     name: "Testability",
     rating: 4,
-    description: "Test từng service, mock events",
+    description: "Test từng service qua API và mock events.",
   },
   {
     name: "Observability",
     rating: 3,
-    description: "Distributed tracing phức tạp",
+    description: "Theo dõi bằng health check, SSE và event timeline.",
   },
 ] as const;
 
-// Event types
 export const EVENT_CATEGORIES = [
   {
     category: "Order Events",
-    color: "bg-green-500",
+    color: "bg-blue-500",
     events: [
       "Order Placed",
       "Order Confirmed",
@@ -108,115 +104,78 @@ export const EVENT_CATEGORIES = [
   },
   {
     category: "Inventory Events",
-    color: "bg-blue-500",
-    events: [
-      "Inventory Updated",
-      "Stock Reserved",
-      "Stock Released",
-      "Low Stock Alert",
-    ],
+    color: "bg-green-500",
+    events: ["Stock Reserved", "Stock Released", "Low Stock Alert"],
   },
   {
     category: "Payment Events",
     color: "bg-orange-500",
-    events: [
-      "Payment Processed",
-      "Payment Failed",
-      "Payment Refunded",
-      "Payment Authorized",
-    ],
+    events: ["Payment Processed", "Payment Failed", "Payment Refunded"],
   },
   {
     category: "Shipping Events",
     color: "bg-purple-500",
-    events: [
-      "Shipping Scheduled",
-      "Order Shipped",
-      "Order Delivered",
-      "Delivery Failed",
-    ],
+    events: ["Shipping Scheduled", "Order Shipped", "Order Delivered"],
   },
   {
     category: "Notification Events",
     color: "bg-red-500",
-    events: [
-      "Notification Sent",
-      "Email Delivered",
-      "SMS Delivered",
-      "Notification Failed",
-    ],
+    events: ["Notification Sent", "Notification Failed"],
   },
 ] as const;
 
-// Design patterns
 export const PATTERNS = [
   {
     name: "Saga Pattern",
     subtitle: "Choreography-based",
     description:
-      "Các service tự phối hợp thông qua events, không có điểm trung tâm điều phối",
+      "Các service tự phối hợp qua event, không cần coordinator trung tâm.",
     icon: "GitBranch",
   },
   {
     name: "Event Sourcing",
     subtitle: "Event Store",
     description:
-      "Lưu trữ tất cả events, có thể tái tạo trạng thái bất kỳ lúc nào",
+      "Lưu mọi event để audit, truy vết và dựng lại timeline đơn hàng.",
     icon: "Database",
   },
   {
     name: "Publish-Subscribe",
     subtitle: "Fan-out Pattern",
-    description: "Event Bus làm message broker, một event có nhiều consumers",
+    description: "Redis Pub/Sub phát một event cho nhiều consumers độc lập.",
     icon: "Radio",
   },
   {
     name: "Idempotency",
     subtitle: "Duplicate Prevention",
-    description: "Xử lý event nhiều lần không gây side effects",
+    description: "Xử lý lại event không gây trừ tiền hoặc trừ kho lặp.",
     icon: "Shield",
   },
   {
     name: "Dead Letter Queue",
     subtitle: "Failed Event Handling",
-    description: "Xử lý events thất bại sau nhiều lần retry",
+    description: "Tách event lỗi để điều tra sau nhiều lần retry.",
     icon: "MailX",
   },
   {
     name: "Circuit Breaker",
     subtitle: "Cascade Failure Prevention",
-    description:
-      "Bảo vệ hệ thống khỏi cascade failures khi gọi external dependencies",
+    description: "Giới hạn lỗi dây chuyền khi gọi external dependencies.",
     icon: "Zap",
   },
 ] as const;
 
-// Tech stack
 export const TECH_STACK = [
-  { category: "Frontend", tech: "React / Angular", role: "Web Application" },
+  { category: "Frontend", tech: "Next.js 16", role: "Storefront + dashboard" },
   {
     category: "API Gateway",
-    tech: "Kong / AWS API Gateway",
-    role: "Entry point, routing",
+    tech: "Express Gateway",
+    role: "Routing, proxy, SSE",
   },
-  { category: "Backend", tech: "Java Spring Boot", role: "Microservices" },
-  { category: "Notification", tech: "Node.js", role: "Notification service" },
-  {
-    category: "Message Broker",
-    tech: "Apache Kafka / RabbitMQ",
-    role: "Event Bus",
-  },
-  {
-    category: "Event Store",
-    tech: "EventStoreDB / Kafka",
-    role: "Event persistence",
-  },
-  { category: "Database", tech: "PostgreSQL", role: "Data storage" },
-  { category: "Cache", tech: "Redis", role: "Hot data caching" },
-  {
-    category: "Monitoring",
-    tech: "Prometheus + Grafana",
-    role: "Metrics & dashboards",
-  },
-  { category: "Tracing", tech: "Jaeger / Zipkin", role: "Distributed tracing" },
+  { category: "Backend", tech: "Node.js / Prisma", role: "Microservices" },
+  { category: "Event Bus", tech: "Redis Pub/Sub", role: "Fan-out events" },
+  { category: "Database", tech: "PostgreSQL", role: "Service storage" },
+  { category: "Container", tech: "Docker Compose", role: "Local workflow" },
+  { category: "UI", tech: "Tailwind + shadcn", role: "Responsive design" },
+  { category: "Realtime", tech: "Server-Sent Events", role: "Live tracking" },
 ] as const;

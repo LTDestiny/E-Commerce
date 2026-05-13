@@ -1,236 +1,207 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Activity,
+  AlertTriangle,
+  Bell,
+  CheckCircle2,
+  CreditCard,
+  Package,
+  Radio,
+  RefreshCw,
   Server,
+  ShoppingBag,
+  Trash2,
+  Truck,
+  Warehouse,
   Wifi,
   WifiOff,
-  RefreshCw,
-  Trash2,
-  Package,
-  CreditCard,
-  Warehouse,
-  Truck,
-  Bell,
-  CheckCircle,
   XCircle,
-  AlertTriangle,
-  Clock,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/shared/page-header";
 import { useEventStream, type SSEEvent } from "@/hooks/use-event-stream";
 import {
-  ordersApi,
   healthApi,
-  type OrderStats,
+  ordersApi,
+  paymentsApi,
+  shipmentsApi,
+  notificationsApi,
   type HealthStatus,
+  type OrderStats,
 } from "@/lib/api";
+import { formatVND } from "@/lib/commerce";
 
-// ==========================================
-// Helper: Event type → color & icon
-// ==========================================
-function getEventStyle(type: string) {
-  if (type.startsWith("ORDER_PLACED"))
-    return { color: "bg-blue-500", icon: Package, label: "Order Placed" };
-  if (type.startsWith("ORDER_CONFIRMED"))
-    return {
-      color: "bg-green-500",
-      icon: CheckCircle,
-      label: "Order Confirmed",
-    };
-  if (type.startsWith("ORDER_CANCELLED"))
-    return { color: "bg-red-500", icon: XCircle, label: "Order Cancelled" };
-  if (type.startsWith("ORDER_COMPLETED"))
-    return {
-      color: "bg-emerald-500",
-      icon: CheckCircle,
-      label: "Order Completed",
-    };
-  if (type.startsWith("STOCK_RESERVED"))
-    return { color: "bg-cyan-500", icon: Warehouse, label: "Stock Reserved" };
-  if (type.startsWith("STOCK_RESERVATION_FAILED"))
-    return {
-      color: "bg-red-400",
-      icon: AlertTriangle,
-      label: "Stock Failed",
-    };
-  if (type.startsWith("STOCK_RELEASED"))
-    return { color: "bg-teal-500", icon: Warehouse, label: "Stock Released" };
-  if (type.startsWith("LOW_STOCK"))
-    return {
-      color: "bg-yellow-500",
-      icon: AlertTriangle,
-      label: "Low Stock Alert",
-    };
-  if (type.startsWith("PAYMENT_PROCESSED"))
-    return {
-      color: "bg-green-600",
-      icon: CreditCard,
-      label: "Payment OK",
-    };
-  if (type.startsWith("PAYMENT_FAILED"))
-    return {
-      color: "bg-red-600",
-      icon: CreditCard,
-      label: "Payment Failed",
-    };
-  if (type.startsWith("PAYMENT_REFUNDED"))
-    return {
-      color: "bg-orange-500",
-      icon: CreditCard,
-      label: "Refunded",
-    };
-  if (type.startsWith("SHIPPING_SCHEDULED"))
-    return { color: "bg-purple-500", icon: Truck, label: "Ship Scheduled" };
-  if (type.startsWith("ORDER_SHIPPED"))
-    return { color: "bg-purple-600", icon: Truck, label: "Shipped" };
-  if (type.startsWith("ORDER_DELIVERED"))
-    return { color: "bg-green-700", icon: Truck, label: "Delivered" };
-  if (type.startsWith("NOTIFICATION"))
-    return { color: "bg-pink-500", icon: Bell, label: type.replace(/_/g, " ") };
-  return { color: "bg-gray-500", icon: Activity, label: type };
+function eventStyle(type: string) {
+  if (type.startsWith("ORDER_PLACED")) {
+    return { icon: ShoppingBag, color: "bg-blue-500", label: "Đơn mới" };
+  }
+  if (type.startsWith("ORDER_CONFIRMED")) {
+    return { icon: CheckCircle2, color: "bg-green-600", label: "Đơn xác nhận" };
+  }
+  if (type.startsWith("ORDER_CANCELLED")) {
+    return { icon: XCircle, color: "bg-red-600", label: "Đơn bị hủy" };
+  }
+  if (type.startsWith("STOCK")) {
+    return { icon: Warehouse, color: "bg-emerald-600", label: "Kho hàng" };
+  }
+  if (type.startsWith("LOW_STOCK")) {
+    return { icon: AlertTriangle, color: "bg-yellow-500", label: "Sắp hết hàng" };
+  }
+  if (type.startsWith("PAYMENT")) {
+    return { icon: CreditCard, color: "bg-orange-500", label: "Thanh toán" };
+  }
+  if (type.startsWith("SHIPPING") || type.startsWith("ORDER_SHIPPED")) {
+    return { icon: Truck, color: "bg-purple-500", label: "Vận chuyển" };
+  }
+  if (type.startsWith("NOTIFICATION")) {
+    return { icon: Bell, color: "bg-rose-500", label: "Thông báo" };
+  }
+  return { icon: Activity, color: "bg-slate-500", label: type || "Event" };
 }
 
-// ==========================================
-// Dashboard Page
-// ==========================================
 export default function DashboardPage() {
   const { events, connected, clearEvents } = useEventStream();
   const [stats, setStats] = useState<OrderStats | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [loadingStats, setLoadingStats] = useState(false);
+  const [counts, setCounts] = useState({
+    payments: 0,
+    shipments: 0,
+    notifications: 0,
+  });
+  const [loading, setLoading] = useState(false);
 
-  const fetchStats = useCallback(async () => {
-    setLoadingStats(true);
+  const refresh = useCallback(async () => {
+    setLoading(true);
     try {
-      const [s, h] = await Promise.all([
-        ordersApi.getStats().catch(() => null),
-        healthApi.check().catch(() => null),
-      ]);
-      if (s) setStats(s);
-      if (h) setHealth(h);
+      const [nextStats, nextHealth, payments, shipments, notifications] =
+        await Promise.all([
+          ordersApi.getStats().catch(() => null),
+          healthApi.check().catch(() => null),
+          paymentsApi.list().catch(() => []),
+          shipmentsApi.list().catch(() => []),
+          notificationsApi.list().catch(() => []),
+        ]);
+      setStats(nextStats);
+      setHealth(nextHealth);
+      setCounts({
+        payments: payments.length,
+        shipments: shipments.length,
+        notifications: notifications.length,
+      });
     } finally {
-      setLoadingStats(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
-  }, [fetchStats]);
+    refresh();
+    const interval = window.setInterval(refresh, 10000);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
 
-  // Refetch stats when new order events arrive
   useEffect(() => {
-    if (events.length > 0 && events[0].type.startsWith("ORDER_")) {
-      fetchStats();
-    }
-  }, [events, fetchStats]);
+    if (events[0]?.type?.startsWith("ORDER_")) refresh();
+  }, [events, refresh]);
+
+  const groupedEvents = useMemo(() => {
+    return events.reduce<Record<string, number>>((acc, event) => {
+      const group = event.type.split("_")[0] || "OTHER";
+      acc[group] = (acc[group] ?? 0) + 1;
+      return acc;
+    }, {});
+  }, [events]);
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Real-Time Dashboard"
-        description="Giám sát hệ thống xử lý đơn hàng theo thời gian thực"
+        title="Dashboard vận hành ecommerce"
+        description="Theo dõi sức khỏe microservices, thống kê đơn hàng và event stream real-time."
+        icon={<Activity className="h-6 w-6 text-primary" />}
       />
 
-      {/* Connection Status */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-3">
         <Badge
           variant={connected ? "default" : "destructive"}
-          className="gap-1.5 px-3 py-1"
+          className="gap-2 px-3 py-1"
         >
-          {connected ? (
-            <Wifi className="h-3.5 w-3.5" />
-          ) : (
-            <WifiOff className="h-3.5 w-3.5" />
-          )}
-          {connected ? "Đang kết nối Event Stream" : "Mất kết nối"}
+          {connected ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+          {connected ? "SSE đang kết nối" : "SSE mất kết nối"}
         </Badge>
-        <Badge variant="outline" className="gap-1.5">
-          <Activity className="h-3.5 w-3.5" />
+        <Badge variant="outline" className="gap-2 px-3 py-1">
+          <Radio className="h-4 w-4" />
           {events.length} events
         </Badge>
+        <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Tải lại
+        </Button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
+        <MetricCard
           title="Tổng đơn hàng"
-          value={stats?.total ?? "-"}
+          value={stats?.total ?? 0}
           icon={Package}
-          loading={loadingStats}
+          loading={loading}
         />
-        <StatsCard
+        <MetricCard
           title="Doanh thu"
-          value={
-            stats ? `${(stats.totalRevenue / 1_000_000).toFixed(1)}M ₫` : "-"
-          }
+          value={formatVND(stats?.totalRevenue ?? 0)}
           icon={CreditCard}
-          loading={loadingStats}
+          loading={loading}
         />
-        <StatsCard
-          title="Đã xác nhận"
-          value={stats?.byStatus?.CONFIRMED ?? 0}
-          icon={CheckCircle}
-          loading={loadingStats}
+        <MetricCard
+          title="Thanh toán"
+          value={counts.payments}
+          icon={CreditCard}
+          loading={loading}
         />
-        <StatsCard
-          title="Đã hủy"
-          value={stats?.byStatus?.CANCELLED ?? 0}
-          icon={XCircle}
-          loading={loadingStats}
+        <MetricCard
+          title="Vận đơn"
+          value={counts.shipments}
+          icon={Truck}
+          loading={loading}
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Event Stream (2/3) */}
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+        <Card className="rounded-lg">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
             <div>
-              <CardTitle className="text-lg">Live Event Stream</CardTitle>
-              <CardDescription>Sự kiện từ tất cả microservices</CardDescription>
+              <CardTitle>Live event stream</CardTitle>
+              <CardDescription>
+                Các event phát ra từ Order, Inventory, Payment, Shipping và
+                Notification service.
+              </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={fetchStats}
-                disabled={loadingStats}
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${loadingStats ? "animate-spin" : ""}`}
-                />
-              </Button>
-              <Button variant="outline" size="sm" onClick={clearEvents}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
+            <Button variant="outline" size="icon-sm" onClick={clearEvents}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[460px] pr-4">
+            <ScrollArea className="h-[500px] pr-3">
               {events.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Clock className="mb-3 h-10 w-10" />
-                  <p>Chưa có sự kiện. Hãy tạo đơn hàng để xem event stream!</p>
+                <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
+                  Chưa có event. Hãy checkout một đơn ở trang Mua hàng.
                 </div>
               ) : (
                 <AnimatePresence initial={false}>
-                  {events.map((evt) => (
-                    <EventItem key={evt.id + evt.timestamp} event={evt} />
+                  {events.map((event) => (
+                    <EventItem key={`${event.id}-${event.timestamp}`} event={event} />
                   ))}
                 </AnimatePresence>
               )}
@@ -238,70 +209,102 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Service Health (1/3) */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Service Health</CardTitle>
-            <CardDescription>Trạng thái các microservices</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {health?.services ? (
-              health.services.map((svc) => (
-                <div
-                  key={svc.name}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                >
-                  <div className="flex items-center gap-2">
-                    <Server className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">{svc.name}</span>
-                  </div>
-                  <Badge
-                    variant={
-                      svc.status === "healthy" ? "default" : "destructive"
-                    }
-                    className="text-xs"
-                  >
-                    {svc.status}
-                  </Badge>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center py-8 text-muted-foreground">
-                <Server className="mb-2 h-8 w-8" />
-                <p className="text-sm">Đang tải...</p>
-              </div>
-            )}
-
-            <Separator />
-
-            {/* Order Status Breakdown */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Phân bổ trạng thái đơn</p>
-              {stats?.byStatus ? (
-                Object.entries(stats.byStatus).map(([status, count]) => (
+        <div className="space-y-6">
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>Service health</CardTitle>
+              <CardDescription>
+                API Gateway kiểm tra từng microservice qua endpoint /health.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {health?.services?.length ? (
+                health.services.map((service) => (
                   <div
-                    key={status}
-                    className="flex items-center justify-between text-sm"
+                    key={service.name}
+                    className="flex items-center justify-between rounded-lg border p-3"
                   >
-                    <span className="text-muted-foreground">{status}</span>
-                    <Badge variant="secondary">{count}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Server className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{service.name}</span>
+                    </div>
+                    <Badge
+                      variant={
+                        service.status === "healthy" ? "default" : "destructive"
+                      }
+                    >
+                      {service.status}
+                    </Badge>
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground">Chưa có dữ liệu</p>
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Không lấy được health. Kiểm tra API Gateway tại port 4000.
+                </div>
               )}
-            </div>
-          </CardContent>
-        </Card>
+              <Separator />
+              <p className="text-xs text-muted-foreground">
+                Gateway status: {health?.status ?? "unknown"} · SSE clients:{" "}
+                {health?.sseClients ?? 0}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>Phân bổ nghiệp vụ</CardTitle>
+              <CardDescription>
+                Đơn hàng, trạng thái và event được gom nhóm để quan sát nhanh.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Trạng thái đơn hàng</p>
+                {stats?.byStatus && Object.keys(stats.byStatus).length > 0 ? (
+                  Object.entries(stats.byStatus).map(([status, count]) => (
+                    <div
+                      key={status}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-muted-foreground">{status}</span>
+                      <Badge variant="secondary">{count}</Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Chưa có đơn.</p>
+                )}
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Event theo domain</p>
+                {Object.keys(groupedEvents).length > 0 ? (
+                  Object.entries(groupedEvents).map(([group, count]) => (
+                    <div
+                      key={group}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-muted-foreground">{group}</span>
+                      <Badge variant="outline">{count}</Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Chưa có event.</p>
+                )}
+              </div>
+              <Separator />
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Thông báo đã gửi</span>
+                <Badge variant="outline">{counts.notifications}</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
 
-// ==========================================
-// Sub-components
-// ==========================================
-function StatsCard({
+function MetricCard({
   title,
   value,
   icon: Icon,
@@ -314,14 +317,16 @@ function StatsCard({
 }) {
   return (
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.2 }}>
-      <Card>
-        <CardContent className="flex items-center gap-4 pt-6">
-          <div className="rounded-lg bg-primary/10 p-3">
+      <Card className="rounded-lg py-5">
+        <CardContent className="flex items-center gap-4 px-5">
+          <div className="flex h-11 w-11 items-center justify-center rounded-md bg-primary/10">
             <Icon className="h-5 w-5 text-primary" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold">{loading ? "..." : value}</p>
+            <p className="truncate text-2xl font-bold">
+              {loading ? "..." : value}
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -330,29 +335,29 @@ function StatsCard({
 }
 
 function EventItem({ event }: { event: SSEEvent }) {
-  const style = getEventStyle(event.type);
+  const style = eventStyle(event.type);
   const Icon = style.icon;
-  const time = new Date(event.timestamp).toLocaleTimeString("vi-VN");
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -20 }}
+      initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0 }}
-      className="mb-2 flex items-start gap-3 rounded-lg border p-3"
+      className="mb-3 flex gap-3 rounded-lg border p-3"
     >
       <div
-        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white ${style.color}`}
+        className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-white ${style.color}`}
       >
         <Icon className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">{style.label}</p>
-          <span className="text-xs text-muted-foreground">{time}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium">{style.label}</p>
+          <Badge variant="outline">{event.type}</Badge>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Source: {event.source} · ID: {event.correlationId?.slice(0, 8)}...
+        <p className="mt-1 text-xs text-muted-foreground">
+          {event.source} · {new Date(event.timestamp).toLocaleString("vi-VN")} ·
+          correlation {event.correlationId?.slice(0, 10) || "n/a"}
         </p>
       </div>
     </motion.div>

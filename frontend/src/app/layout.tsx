@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "E-Commerce Order Processing System",
+  title: "TechSphere Commerce",
   description:
-    "Event-Driven Architecture for Real-Time Order Processing - KTTKPM Project",
+    "Web thương mại điện tử máy tính và công nghệ với Event-Driven Architecture.",
 };
 
 export default function RootLayout({
@@ -25,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="vi" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
