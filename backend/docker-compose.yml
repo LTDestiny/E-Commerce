@@ -1,9 +1,4 @@
-version: "3.9"
-
 services:
-  # ==========================================
-  # Infrastructure
-  # ==========================================
   redis:
     image: redis:7-alpine
     container_name: ecommerce-redis
@@ -24,8 +19,9 @@ services:
     ports:
       - "5433:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=admin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: postgres
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
@@ -36,9 +32,28 @@ services:
       timeout: 3s
       retries: 10
 
-  # ==========================================
-  # API Gateway
-  # ==========================================
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    container_name: ecommerce-auth-service
+    ports:
+      - "4006:4006"
+    environment:
+      PORT: 4006
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/ecommerce_auth?schema=public
+      JWT_ACCESS_SECRET: change_me_access_secret
+      JWT_REFRESH_SECRET: change_me_refresh_secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 30d
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api-gateway:
     build:
       context: .
@@ -47,22 +62,22 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - PORT=4000
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - ORDER_SERVICE_URL=http://order-service:4001
-      - PAYMENT_SERVICE_URL=http://payment-service:4002
-      - INVENTORY_SERVICE_URL=http://inventory-service:4003
-      - SHIPPING_SERVICE_URL=http://shipping-service:4004
-      - NOTIFICATION_SERVICE_URL=http://notification-service:4005
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      AUTH_SERVICE_URL: http://auth-service:4006
+      ORDER_SERVICE_URL: http://order-service:4001
+      PAYMENT_SERVICE_URL: http://payment-service:4002
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+      SHIPPING_SERVICE_URL: http://shipping-service:4004
+      NOTIFICATION_SERVICE_URL: http://notification-service:4005
     restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
+      auth-service:
+        condition: service_started
 
-  # ==========================================
-  # Microservices
-  # ==========================================
   order-service:
     build:
       context: .
@@ -71,10 +86,10 @@ services:
     ports:
       - "4001:4001"
     environment:
-      - PORT=4001
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - DATABASE_URL=postgresql://postgres:admin@postgres:5432/order_db
+      PORT: 4001
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/order_db
     restart: unless-stopped
     depends_on:
       redis:
@@ -90,10 +105,10 @@ services:
     ports:
       - "4002:4002"
     environment:
-      - PORT=4002
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - DATABASE_URL=postgresql://postgres:admin@postgres:5432/payment_db
+      PORT: 4002
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/payment_db
     restart: unless-stopped
     depends_on:
       redis:
@@ -109,10 +124,10 @@ services:
     ports:
       - "4003:4003"
     environment:
-      - PORT=4003
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - DATABASE_URL=postgresql://postgres:admin@postgres:5432/inventory_db
+      PORT: 4003
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/inventory_db
     restart: unless-stopped
     depends_on:
       redis:
@@ -128,10 +143,10 @@ services:
     ports:
       - "4004:4004"
     environment:
-      - PORT=4004
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - DATABASE_URL=postgresql://postgres:admin@postgres:5432/shipping_db
+      PORT: 4004
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/shipping_db
     restart: unless-stopped
     depends_on:
       redis:
@@ -147,10 +162,10 @@ services:
     ports:
       - "4005:4005"
     environment:
-      - PORT=4005
-      - REDIS_URL=redis://redis:6379
-      - CORS_ORIGIN=http://localhost:3000
-      - DATABASE_URL=postgresql://postgres:admin@postgres:5432/notification_db
+      PORT: 4005
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/notification_db
     restart: unless-stopped
     depends_on:
       redis:
@@ -158,25 +173,24 @@ services:
       postgres:
         condition: service_healthy
 
-volumes:
-  redis-data:
-  postgres-data:
-
-  # ==========================================
-  # Frontend (Next.js Dev)
-  # ==========================================
   frontend:
     build:
-      context: ..
-      dockerfile: backend/frontend.Dockerfile
+      context: ../frontend
+      dockerfile: Dockerfile
     container_name: ecommerce-frontend
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:4000
     volumes:
       - ../frontend:/app
       - /app/node_modules
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_started
     restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:

@@ -22,12 +22,12 @@ export function createPaymentRoutes(
     }
   });
 
-  // GET /api/payments/:id - Get payment by ID
-  router.get("/:id", async (req: Request, res: Response) => {
+  // GET /api/payments/order/:orderId - Get payment by order
+  router.get("/order/:orderId", async (req: Request, res: Response) => {
     try {
-      const payment = await paymentRepository.findById(req.params.id);
+      const payment = await paymentRepository.findByOrderId(req.params.orderId);
       if (!payment) {
-        res.status(404).json({ error: "Payment not found" });
+        res.status(404).json({ error: "Payment not found for this order" });
         return;
       }
       res.json(payment);
@@ -36,12 +36,12 @@ export function createPaymentRoutes(
     }
   });
 
-  // GET /api/payments/order/:orderId - Get payment by order
-  router.get("/order/:orderId", async (req: Request, res: Response) => {
+  // GET /api/payments/:id - Get payment by ID
+  router.get("/:id", async (req: Request, res: Response) => {
     try {
-      const payment = await paymentRepository.findByOrderId(req.params.orderId);
+      const payment = await paymentRepository.findById(req.params.id);
       if (!payment) {
-        res.status(404).json({ error: "Payment not found for this order" });
+        res.status(404).json({ error: "Payment not found" });
         return;
       }
       res.json(payment);

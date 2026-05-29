@@ -1,6 +1,6 @@
-﻿-- ==========================================
+-- ==========================================
 -- PostgreSQL Init Script
--- Creates 5 databases + all tables
+-- Creates 6 databases + all tables
 -- (Database-per-Service pattern)
 -- ==========================================
 
@@ -10,12 +10,14 @@ CREATE DATABASE payment_db;
 CREATE DATABASE inventory_db;
 CREATE DATABASE shipping_db;
 CREATE DATABASE notification_db;
+CREATE DATABASE ecommerce_auth;
 
 GRANT ALL PRIVILEGES ON DATABASE order_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE payment_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE inventory_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE shipping_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE notification_db TO postgres;
+GRANT ALL PRIVILEGES ON DATABASE ecommerce_auth TO postgres;
 
 -- ==========================================
 -- ORDER DB - Tables
@@ -190,3 +192,24 @@ CREATE TABLE "events" (
 );
 CREATE INDEX "events_correlationId_idx" ON "events"("correlationId");
 CREATE INDEX "events_type_idx" ON "events"("type");
+
+-- ==========================================
+-- AUTH DB - Tables
+-- ==========================================
+\c ecommerce_auth
+
+CREATE TABLE "users" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "passwordHash" TEXT NOT NULL,
+    "role" TEXT NOT NULL DEFAULT 'USER',
+    "refreshTokenHash" TEXT,
+    "refreshTokenJti" TEXT,
+    "refreshTokenExp" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+CREATE UNIQUE INDEX "users_refreshTokenJti_key" ON "users"("refreshTokenJti");

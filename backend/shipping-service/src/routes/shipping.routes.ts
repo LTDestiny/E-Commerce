@@ -22,20 +22,6 @@ export function createShippingRoutes(
     }
   });
 
-  // GET /api/shipments/:id - Get shipment by ID
-  router.get("/:id", async (req: Request, res: Response) => {
-    try {
-      const shipment = await shipmentRepository.findById(req.params.id);
-      if (!shipment) {
-        res.status(404).json({ error: "Shipment not found" });
-        return;
-      }
-      res.json(shipment);
-    } catch (error) {
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
   // GET /api/shipments/order/:orderId - Get shipment by order
   router.get("/order/:orderId", async (req: Request, res: Response) => {
     try {
@@ -44,6 +30,20 @@ export function createShippingRoutes(
       );
       if (!shipment) {
         res.status(404).json({ error: "Shipment not found for this order" });
+        return;
+      }
+      res.json(shipment);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/shipments/:id - Get shipment by ID
+  router.get("/:id", async (req: Request, res: Response) => {
+    try {
+      const shipment = await shipmentRepository.findById(req.params.id);
+      if (!shipment) {
+        res.status(404).json({ error: "Shipment not found" });
         return;
       }
       res.json(shipment);

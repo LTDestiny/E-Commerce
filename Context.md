@@ -405,4 +405,5 @@ Architecture/design docs:
 
 ## Update Log
 
+- 2026-05-29: Fixed registration and login functionality. Removed premature body-parser in the API Gateway (`backend/api-gateway/src/index.ts`) that was consuming request streams and hanging POST requests. Appended the missing `users` table schema to `backend/postgres-init/init.sql` to ensure correct database initialization. Updated the `/auth` frontend page to dynamically hide the login card and center the layout upon successful authentication, and renamed the navigation labels from "Auth" to "Login".
 - 2026-05-01: Read the project source and rewrote `Context.md` as the canonical working context. Captured runtime architecture, event flow, service responsibilities, route surface, commands, known issues, and the rule that future updates must read and update this file.
