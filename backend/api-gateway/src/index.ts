@@ -8,6 +8,7 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 import Redis from "ioredis";
 import rateLimit from "express-rate-limit";
 import { RedisStore, type RedisReply } from "rate-limit-redis";
+import jwt from "jsonwebtoken";
 import { config } from "./config";
 
 const SERVICE_HEALTH_TIMEOUT_MS = config.gateway.healthTimeoutMs;
@@ -264,9 +265,56 @@ async function main() {
     },
   );
 
+  function gatewayAuthMiddleware(req: Request, res: ExpressResponse, next: NextFunction) {
+    const publicPaths = [
+      "/api/auth/login",
+      "/api/auth/register",
+      "/api/auth/refresh",
+      "/api/auth/forgot-password",
+      "/api/auth/reset-password",
+      "/api/health",
+      "/health",
+      "/api/events/stream"
+    ];
+
+    if (publicPaths.includes(req.path) || req.path.startsWith("/api/inventory")) {
+      return next();
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing authorization token", code: "UNAUTHORIZED" });
+      return;
+    }
+
+    const token = authHeader.slice(7);
+    try {
+      const secret = process.env.JWT_ACCESS_SECRET || "change_me_access_secret";
+      const decoded = jwt.verify(token, secret) as any;
+
+      req.headers["x-user-id"] = decoded.id;
+      req.headers["x-user-email"] = decoded.email;
+      req.headers["x-user-role"] = decoded.role;
+      req.headers["x-user-name"] = decoded.name;
+
+      next();
+    } catch (err) {
+      res.status(401).json({ error: "Invalid or expired token", code: "INVALID_TOKEN" });
+      return;
+    }
+  }
+
+  app.use(gatewayAuthMiddleware);
+
   app.use(...createStableProxy({
     name: "AuthService",
     pathFilter: "/api/auth",
+    target: config.services.auth,
+  }));
+
+  app.use(...createStableProxy({
+    name: "AuthServiceUsers",
+    pathFilter: "/api/users",
     target: config.services.auth,
   }));
 

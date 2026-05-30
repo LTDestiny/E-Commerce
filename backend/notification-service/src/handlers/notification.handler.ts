@@ -186,7 +186,7 @@ async function sendNotification(
   correlationId: string,
   eventBus: IEventBus,
   eventStore: IEventStore,
-  idempotencyStore: IdempotencyStore,
+  idempotencyStore: any,
 ): Promise<void> {
   const idempotencyKey = `notification-${orderId}-${correlationId}`;
   if (await idempotencyStore.check(idempotencyKey)) {

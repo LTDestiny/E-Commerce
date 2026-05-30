@@ -16,6 +16,8 @@ model User {
   refreshTokenHash  String?            @db.Text
   refreshTokenJti   String?            @unique
   refreshTokenExp   DateTime?
+  resetPasswordToken   String?         @unique
+  resetPasswordExpires DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 

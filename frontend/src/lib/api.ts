@@ -38,12 +38,16 @@ export function saveAuthSession(auth: AuthResponse) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(TOKEN_KEY, auth.accessToken);
   window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+  // Set cookie for Next.js Middleware route guarding
+  document.cookie = `auth_token=${auth.accessToken}; path=/; max-age=2592000; SameSite=Lax; Secure=${window.location.protocol === 'https:'}`;
 }
 
 export function clearAuthSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  // Clear cookie
+  document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -93,6 +97,16 @@ export const authApi = {
   me: () => fetchWithRefresh<{ user: AuthUser }>("/api/auth/me"),
   refresh: () => fetchApi<AuthResponse>("/api/auth/refresh", { method: "POST" }),
   logout: () => fetchApi<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) =>
+    fetchApi<{ message: string }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  resetPassword: (payload: { token: string; password: string }) =>
+    fetchApi<{ ok: boolean; message: string }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ----- Orders -----

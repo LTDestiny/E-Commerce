@@ -45,7 +45,7 @@ async function main() {
       if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
         try {
           const { checkKafkaConnectivity } =
-            await import("@ecommerce/shared/kafka/health");
+            await import("@ecommerce/shared");
           kafkaConnected = await checkKafkaConnectivity(
             process.env.KAFKA_BOOTSTRAP_SERVERS,
           );
