@@ -34,6 +34,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import {
   inventoryApi,
   ordersApi,
+  getStoredUser,
   type CreateOrderPayload,
   type InventoryItem,
   type Order,
@@ -102,6 +103,49 @@ export default function OrdersPage() {
     street: DEFAULT_ADDRESS.street,
     city: DEFAULT_ADDRESS.city,
   });
+
+  const [currentUser, setCurrentUser] = useState<ReturnType<typeof getStoredUser>>(null);
+  const [cartLoaded, setCartLoaded] = useState(false);
+
+  useEffect(() => {
+    setCurrentUser(getStoredUser());
+  }, []);
+
+  // Load user-specific cart from localStorage when currentUser is populated
+  useEffect(() => {
+    if (currentUser) {
+      const cartKey = `techsphere_cart_${currentUser.id}`;
+      const storedCart = localStorage.getItem(cartKey);
+      if (storedCart) {
+        try {
+          setCart(JSON.parse(storedCart));
+        } catch {
+          setCart({});
+        }
+      } else {
+        setCart({});
+      }
+      setCartLoaded(true);
+    }
+  }, [currentUser]);
+
+  // Persist the cart to localStorage whenever it changes, only after it is loaded
+  useEffect(() => {
+    if (currentUser && cartLoaded) {
+      const cartKey = `techsphere_cart_${currentUser.id}`;
+      localStorage.setItem(cartKey, JSON.stringify(cart));
+    }
+  }, [cart, currentUser, cartLoaded]);
+
+  // Pre-fill recipient name with current user name
+  useEffect(() => {
+    if (currentUser) {
+      setCustomer((prev) => ({
+        ...prev,
+        name: currentUser.name || prev.name,
+      }));
+    }
+  }, [currentUser]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -173,7 +217,7 @@ export default function OrdersPage() {
     setApiMessage(null);
     try {
       const payload: CreateOrderPayload = {
-        customerId: createCustomerId(),
+        customerId: currentUser ? currentUser.id : createCustomerId(),
         items: cartItems.map((item) => ({
           productId: item.id,
           productName: item.name,
