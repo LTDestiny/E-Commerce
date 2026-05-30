@@ -30,7 +30,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-12">
-      <section className="relative -mx-4 min-h-[620px] overflow-hidden sm:-mx-6 lg:-mx-8">
+      <section className="relative -mx-4 min-h-[620px] overflow-hidden sm:-mx-6 lg:-mx-8 rounded-xl">
         <Image
           src="/commerce-hero.png"
           alt="Cửa hàng công nghệ TechSphere"

@@ -39,17 +39,28 @@ export function Navbar() {
   const [user, setUser] = useState<ReturnType<typeof getStoredUser>>(null);
   const [cartCount, setCartCount] = useState(0);
 
+  // ✅ FIX Hydration CLS: chờ client mount xong mới render nội dung
+  // phụ thuộc localStorage (user, cartCount) — tránh layout shift
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
+    setMounted(true);
     setUser(getStoredUser());
     setCartCount(getCartCount(readCart()));
 
     const syncCart = () => setCartCount(getCartCount(readCart()));
+    const syncUser = () => setUser(getStoredUser());
+
     window.addEventListener(CART_UPDATED_EVENT, syncCart);
     window.addEventListener("storage", syncCart);
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("auth-changed", syncUser);
 
     return () => {
       window.removeEventListener(CART_UPDATED_EVENT, syncCart);
       window.removeEventListener("storage", syncCart);
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("auth-changed", syncUser);
     };
   }, []);
 
@@ -61,28 +72,43 @@ export function Navbar() {
     window.location.href = "/";
   }
 
+  // Placeholder vô hình cùng kích thước auth button
+  // → giữ navbar width cố định trước khi mount
+  const authPlaceholder = (
+    <div className="h-8 w-[100px] shrink-0" aria-hidden />
+  );
+
   return (
     <nav className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-4">
           <Link href="/" className="flex shrink-0 items-center gap-2">
-            <motion.div whileHover={{ rotate: 10 }} className="flex items-center justify-center rounded-md bg-primary p-2">
+            <motion.div
+              whileHover={{ rotate: 10 }}
+              className="flex items-center justify-center rounded-md bg-primary p-2"
+            >
               <Package className="h-5 w-5 text-primary-foreground" />
             </motion.div>
             <span className="hidden text-lg font-bold sm:inline-block">TechSphere</span>
           </Link>
 
-          <div className="hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
+          {/* Desktop nav */}
+          <div className="hidden flex-1 items-center justify-end gap-1 overflow-hidden md:flex">
             {NAV_ITEMS.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (
                 <Link key={item.href} href={item.href} className="shrink-0">
                   <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                    <Button variant={isActive ? "default" : "ghost"} size="sm" className={cn("gap-2 text-sm", isActive && "pointer-events-none")}>
+                    <Button
+                      variant={isActive ? "default" : "ghost"}
+                      size="sm"
+                      className={cn("gap-2 text-sm", isActive && "pointer-events-none")}
+                    >
                       <Icon className="h-4 w-4" />
                       {item.label}
-                      {item.href === "/cart" && cartCount > 0 && (
+                      {/* Badge giỏ hàng — chỉ hiện sau mount */}
+                      {mounted && item.href === "/cart" && cartCount > 0 && (
                         <Badge variant="secondary" className="ml-1 h-5 px-1.5">
                           {cartCount}
                         </Badge>
@@ -92,38 +118,67 @@ export function Navbar() {
                 </Link>
               );
             })}
-            <Link href="/auth" className="shrink-0">
-              <Button variant={pathname === "/auth" ? "default" : "outline"} size="sm" className="gap-2 text-sm">
-                <LogIn className="h-4 w-4" />
-                Login
-              </Button>
-            </Link>
-            {user && (
-              <Button variant="ghost" size="sm" className="gap-2 text-sm" onClick={logout}>
+
+            {/* Auth buttons — placeholder trước mount để giữ layout ổn định */}
+            {!mounted ? (
+              authPlaceholder
+            ) : !user ? (
+              <Link href="/auth" className="shrink-0">
+                <Button
+                  variant={pathname === "/auth" ? "default" : "outline"}
+                  size="sm"
+                  className="gap-2 text-sm"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Đăng nhập
+                </Button>
+              </Link>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-sm"
+                onClick={logout}
+              >
                 <LogOut className="h-4 w-4" />
-                Logout
+                Đăng xuất
               </Button>
             )}
           </div>
 
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen((open) => !open)}>
+          {/* Hamburger mobile */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={() => setMobileOpen((open) => !open)}
+          >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </div>
       </div>
 
+      {/* Mobile drawer */}
       {mobileOpen && (
-        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="border-t md:hidden">
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="border-t md:hidden"
+        >
           <div className="space-y-1 px-4 py-3">
             {NAV_ITEMS.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (
                 <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)}>
-                  <Button variant={isActive ? "default" : "ghost"} className="w-full justify-start gap-2">
+                  <Button
+                    variant={isActive ? "default" : "ghost"}
+                    className="w-full justify-start gap-2"
+                  >
                     <Icon className="h-4 w-4" />
                     {item.label}
-                    {item.href === "/cart" && cartCount > 0 && (
+                    {mounted && item.href === "/cart" && cartCount > 0 && (
                       <Badge variant="secondary" className="ml-auto">
                         {cartCount}
                       </Badge>
@@ -132,16 +187,26 @@ export function Navbar() {
                 </Link>
               );
             })}
-            <Link href="/auth" onClick={() => setMobileOpen(false)}>
-              <Button variant={pathname === "/auth" ? "default" : "ghost"} className="w-full justify-start gap-2">
-                <LogIn className="h-4 w-4" />
-                Login
-              </Button>
-            </Link>
-            {user && (
-              <Button variant="ghost" className="w-full justify-start gap-2" onClick={logout}>
+
+            {mounted && !user && (
+              <Link href="/auth" onClick={() => setMobileOpen(false)}>
+                <Button
+                  variant={pathname === "/auth" ? "default" : "ghost"}
+                  className="w-full justify-start gap-2"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Đăng nhập
+                </Button>
+              </Link>
+            )}
+            {mounted && user && (
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-2"
+                onClick={logout}
+              >
                 <LogOut className="h-4 w-4" />
-                Logout
+                Đăng xuất
               </Button>
             )}
           </div>

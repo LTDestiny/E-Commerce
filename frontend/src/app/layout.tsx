@@ -18,7 +18,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}>
         <TooltipProvider>
           <Navbar />
-          {children}
+          <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            {children}
+          </main>
         </TooltipProvider>
       </body>
     </html>
