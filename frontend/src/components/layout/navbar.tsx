@@ -44,31 +44,42 @@ export function Navbar() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setUser(getStoredUser());
-    setCartCount(getCartCount(readCart()));
+    const syncSession = () => {
+      setUser(getStoredUser());
+      setCartCount(getCartCount(readCart()));
+    };
 
-    const syncCart = () => setCartCount(getCartCount(readCart()));
-    const syncUser = () => setUser(getStoredUser());
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setMounted(true);
+      syncSession();
+    });
 
-    window.addEventListener(CART_UPDATED_EVENT, syncCart);
-    window.addEventListener("storage", syncCart);
-    window.addEventListener("storage", syncUser);
-    window.addEventListener("auth-changed", syncUser);
+    window.addEventListener(CART_UPDATED_EVENT, syncSession);
+    window.addEventListener("storage", syncSession);
+    window.addEventListener("auth-changed", syncSession);
+    window.addEventListener("focus", syncSession);
+    window.addEventListener("pageshow", syncSession);
+    document.addEventListener("visibilitychange", syncSession);
 
     return () => {
-      window.removeEventListener(CART_UPDATED_EVENT, syncCart);
-      window.removeEventListener("storage", syncCart);
-      window.removeEventListener("storage", syncUser);
-      window.removeEventListener("auth-changed", syncUser);
+      active = false;
+      window.removeEventListener(CART_UPDATED_EVENT, syncSession);
+      window.removeEventListener("storage", syncSession);
+      window.removeEventListener("auth-changed", syncSession);
+      window.removeEventListener("focus", syncSession);
+      window.removeEventListener("pageshow", syncSession);
+      document.removeEventListener("visibilitychange", syncSession);
     };
-  }, []);
+  }, [pathname]);
 
   async function logout() {
-    await authApi.logout().catch(() => undefined);
     clearAuthSession();
     setUser(null);
+    setCartCount(0);
     setMobileOpen(false);
+    void authApi.logout().catch(() => undefined);
     window.location.href = "/";
   }
 

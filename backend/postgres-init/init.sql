@@ -207,9 +207,12 @@ CREATE TABLE "users" (
     "refreshTokenHash" TEXT,
     "refreshTokenJti" TEXT,
     "refreshTokenExp" TIMESTAMP(3),
+    "resetPasswordToken" TEXT,
+    "resetPasswordExpires" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 CREATE UNIQUE INDEX "users_refreshTokenJti_key" ON "users"("refreshTokenJti");
+CREATE UNIQUE INDEX "users_resetPasswordToken_key" ON "users"("resetPasswordToken");

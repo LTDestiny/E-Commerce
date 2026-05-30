@@ -13,6 +13,10 @@ interface AuthState {
   clearError: () => void;
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: getStoredUser(),
   token: getStoredToken(),
@@ -23,10 +27,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const response = await authApi.login(payload);
-      saveAuthSession(response);
+      saveAuthSession(response, { mergeGuestCart: true });
       set({ user: response.user, token: response.accessToken, loading: false });
-    } catch (err: any) {
-      set({ error: err.message || "Đăng nhập thất bại", loading: false });
+    } catch (err: unknown) {
+      set({ error: getErrorMessage(err, "Đăng nhập thất bại"), loading: false });
       throw err;
     }
   },
@@ -35,24 +39,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       const response = await authApi.register(payload);
-      saveAuthSession(response);
+      saveAuthSession(response, { mergeGuestCart: true });
       set({ user: response.user, token: response.accessToken, loading: false });
-    } catch (err: any) {
-      set({ error: err.message || "Đăng ký thất bại", loading: false });
+    } catch (err: unknown) {
+      set({ error: getErrorMessage(err, "Đăng ký thất bại"), loading: false });
       throw err;
     }
   },
 
   logout: async () => {
     set({ loading: true });
-    try {
-      await authApi.logout();
-    } catch (err) {
+    clearAuthSession();
+    set({ user: null, token: null, loading: false });
+    authApi.logout().catch((err) => {
       console.error("Logout request failed", err);
-    } finally {
-      clearAuthSession();
-      set({ user: null, token: null, loading: false });
-    }
+    });
   },
 
   checkSession: () => {

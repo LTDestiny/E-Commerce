@@ -72,12 +72,14 @@ export default function CartPage() {
 
     syncCart();
     window.addEventListener(CART_UPDATED_EVENT, syncCart);
+    window.addEventListener("auth-changed", syncCart);
     window.addEventListener("storage", syncCart);
 
     inventoryApi.list().then(setInventory).catch(() => setInventory([]));
 
     return () => {
       window.removeEventListener(CART_UPDATED_EVENT, syncCart);
+      window.removeEventListener("auth-changed", syncCart);
       window.removeEventListener("storage", syncCart);
       if (cooldownRef.current) clearTimeout(cooldownRef.current);
     };

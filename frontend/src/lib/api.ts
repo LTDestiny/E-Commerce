@@ -2,6 +2,12 @@
 // API Client - Connect to Backend API Gateway
 // ==========================================
 
+import {
+  CART_UPDATED_EVENT,
+  clearGuestCart,
+  mergeGuestCartIntoUser,
+} from "@/lib/cart";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const TOKEN_KEY = "techsphere_auth_token";
 const USER_KEY = "techsphere_auth_user";
@@ -16,6 +22,10 @@ export type AuthUser = {
 export type AuthResponse = {
   user: AuthUser;
   accessToken: string;
+};
+
+type SaveAuthSessionOptions = {
+  mergeGuestCart?: boolean;
 };
 
 export function getStoredToken() {
@@ -34,20 +44,31 @@ export function getStoredUser() {
   }
 }
 
-export function saveAuthSession(auth: AuthResponse) {
+export function saveAuthSession(
+  auth: AuthResponse,
+  options: SaveAuthSessionOptions = {},
+) {
   if (typeof window === "undefined") return;
+  if (options.mergeGuestCart) {
+    mergeGuestCartIntoUser(auth.user.id);
+  }
   window.localStorage.setItem(TOKEN_KEY, auth.accessToken);
   window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
   // Set cookie for Next.js Middleware route guarding
   document.cookie = `auth_token=${auth.accessToken}; path=/; max-age=2592000; SameSite=Lax; Secure=${window.location.protocol === 'https:'}`;
+  window.dispatchEvent(new Event("auth-changed"));
+  window.dispatchEvent(new Event(CART_UPDATED_EVENT));
 }
 
 export function clearAuthSession() {
   if (typeof window === "undefined") return;
+  clearGuestCart();
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
   // Clear cookie
   document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  window.dispatchEvent(new Event("auth-changed"));
+  window.dispatchEvent(new Event(CART_UPDATED_EVENT));
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {

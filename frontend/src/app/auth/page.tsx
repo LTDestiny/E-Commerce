@@ -59,13 +59,13 @@ function AuthContent() {
 
       if (mode === "register") {
         const payload = await authApi.register({ name, email, password });
-        saveAuthSession(payload);
+        saveAuthSession(payload, { mergeGuestCart: true });
         setCurrentUser(getStoredUser());
         router.push(next);
         router.refresh();
       } else if (mode === "login") {
         const payload = await authApi.login({ email, password });
-        saveAuthSession(payload);
+        saveAuthSession(payload, { mergeGuestCart: true });
         setCurrentUser(getStoredUser());
         router.push(next);
         router.refresh();
@@ -96,9 +96,9 @@ function AuthContent() {
   }
 
   async function logout() {
-    await authApi.logout().catch(() => undefined);
     clearAuthSession();
     setCurrentUser(null);
+    void authApi.logout().catch(() => undefined);
     router.refresh();
   }
 

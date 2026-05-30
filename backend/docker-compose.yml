@@ -329,9 +329,11 @@ services:
     environment:
       NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://localhost:4000
+    command: npm run dev -- --webpack
     volumes:
       - ../frontend:/app
       - /app/node_modules
+      - /app/.next
     depends_on:
       api-gateway:
         condition: service_healthy
