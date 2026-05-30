@@ -162,6 +162,7 @@ export interface InventoryItem {
 export const inventoryApi = {
   list: () => fetchApi<InventoryItem[]>("/api/inventory"),
   get: (productId: string) => fetchApi<InventoryItem>(`/api/inventory/${productId}`),
+  lowStock: () => fetchApi<InventoryItem[]>("/api/inventory/alerts/low-stock"),
 };
 
 // ----- Payments -----

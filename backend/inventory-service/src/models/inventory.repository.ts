@@ -9,6 +9,7 @@ import {
   StockReservationRow,
   FailedStockItem,
 } from "../types";
+import { deleteCachedInventoryProducts } from "../lib/cache";
 
 function toInventoryItem(row: InventoryItemRow): InventoryItem {
   return {
@@ -144,6 +145,8 @@ class InventoryRepository {
       });
     });
 
+    await deleteCachedInventoryProducts(items.map((item) => item.productId));
+
     return { success: true, reservation: toStockReservation(reservation) };
   }
 
@@ -175,6 +178,8 @@ class InventoryRepository {
         data: { status: "RELEASED" },
       });
     });
+
+    await deleteCachedInventoryProducts(items.map((item) => item.productId));
 
     return true;
   }

@@ -4,13 +4,14 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus } from "@ecommerce/shared";
+import { RedisEventBus, KafkaEventBus } from "@ecommerce/shared";
 import { config } from "./config";
 import { createInventoryRoutes } from "./routes/inventory.routes";
 import { registerEventHandlers } from "./handlers/inventory.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
 import { inventoryRepository } from "./models/inventory.repository";
+import { disconnectCache } from "./lib/cache";
 
 async function main() {
   await prisma.$connect();
@@ -23,7 +24,20 @@ async function main() {
   app.use(cors({ origin: config.cors.origin }));
   app.use(express.json());
 
-  const eventBus = new RedisEventBus(config.redis.url, config.serviceName);
+  const eventBus = process.env.KAFKA_BOOTSTRAP_SERVERS
+    ? new KafkaEventBus(
+        process.env.KAFKA_BOOTSTRAP_SERVERS,
+        config.serviceName,
+        {
+          maxRetries: process.env.KAFKA_MAX_RETRIES
+            ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
+            : undefined,
+          baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
+            ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
+            : undefined,
+        },
+      )
+    : new RedisEventBus(config.redis.url, config.serviceName);
   const eventStore = new PrismaEventStore(prisma);
 
   registerEventHandlers(eventBus, eventStore);
@@ -31,12 +45,28 @@ async function main() {
   app.use("/api/inventory", createInventoryRoutes(eventBus, eventStore));
 
   app.get("/health", (_req, res) => {
-    res.json({
-      service: config.serviceName,
-      status: "healthy",
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-    });
+    (async () => {
+      let kafkaConnected = null;
+      if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
+        try {
+          const { checkKafkaConnectivity } =
+            await import("@ecommerce/shared/kafka/health");
+          kafkaConnected = await checkKafkaConnectivity(
+            process.env.KAFKA_BOOTSTRAP_SERVERS,
+          );
+        } catch {
+          kafkaConnected = false;
+        }
+      }
+
+      res.json({
+        service: config.serviceName,
+        status: "healthy",
+        uptime: process.uptime(),
+        kafka: kafkaConnected,
+        timestamp: new Date().toISOString(),
+      });
+    })();
   });
 
   app.listen(config.port, () => {
@@ -47,6 +77,7 @@ async function main() {
 
   process.on("SIGTERM", async () => {
     await eventBus.disconnect();
+    await disconnectCache();
     await prisma.$disconnect();
     process.exit(0);
   });

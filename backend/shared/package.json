@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "ioredis": "^5.4.1",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "kafkajs": "^2.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -4,7 +4,7 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus } from "@ecommerce/shared";
+import { RedisEventBus, KafkaEventBus } from "@ecommerce/shared";
 import { config } from "./config";
 import { createOrderRoutes } from "./routes/order.routes";
 import { registerEventHandlers } from "./handlers/order.handler";
@@ -22,8 +22,21 @@ async function main() {
   app.use(cors({ origin: config.cors.origin }));
   app.use(express.json());
 
-  // Event infrastructure
-  const eventBus = new RedisEventBus(config.redis.url, config.serviceName);
+  // Event infrastructure (Kafka in production if configured)
+  const eventBus = process.env.KAFKA_BOOTSTRAP_SERVERS
+    ? new KafkaEventBus(
+        process.env.KAFKA_BOOTSTRAP_SERVERS,
+        config.serviceName,
+        {
+          maxRetries: process.env.KAFKA_MAX_RETRIES
+            ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
+            : undefined,
+          baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
+            ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
+            : undefined,
+        },
+      )
+    : new RedisEventBus(config.redis.url, config.serviceName);
   const eventStore = new PrismaEventStore(prisma);
 
   // Register event handlers (Saga Pattern - Choreography)
@@ -33,11 +46,25 @@ async function main() {
   app.use("/api/orders", createOrderRoutes(eventBus, eventStore));
 
   // Health check
-  app.get("/health", (_req, res) => {
+  app.get("/health", async (_req, res) => {
+    let kafkaConnected = null;
+    if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
+      try {
+        const { checkKafkaConnectivity } =
+          await import("@ecommerce/shared/kafka/health");
+        kafkaConnected = await checkKafkaConnectivity(
+          process.env.KAFKA_BOOTSTRAP_SERVERS,
+        );
+      } catch {
+        kafkaConnected = false;
+      }
+    }
+
     res.json({
       service: config.serviceName,
       status: "healthy",
       uptime: process.uptime(),
+      kafka: kafkaConnected,
       timestamp: new Date().toISOString(),
     });
   });
