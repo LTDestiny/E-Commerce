@@ -391,6 +391,7 @@ Do not revert user changes without explicit request.
 
 Architecture/design docs:
 
+- `Kien-truc-va-ly-thuyet.md`: Vietnamese theory/defense document aligned with the current runnable project. Covers architecture style, architecture characteristics, DevOps, AI usage level, design patterns, CQRS, event sourcing, sync/async communication, Redis rationale, performance improvements, features, diagrams, and technologies.
 - `ecommerce-order-processing.dsl`: C4/Structurizr model for system context, containers, and service components.
 - Mermaid diagrams in `Diagram/`:
   - `Design Patterns Applied.mmd`
@@ -405,5 +406,10 @@ Architecture/design docs:
 
 ## Update Log
 
+- 2026-05-30: Merged `origin/feature/architecture-characteristics-clean` and `origin/feature/login+logout` into `master` (`login+logout` was already contained in the architecture branch). Converted the frontend from architecture/demo pages into an ecommerce storefront with products, persistent cart, checkout, order history, profile, and operations dashboard. Removed architecture/pattern/event-flow/error/scalability routes from the app navigation and source tree. Updated API Gateway rate limiting to use Redis via `rate-limit-redis` instead of process memory.
+- 2026-05-30: Hardened API Gateway for service instability and overload: added env-driven Redis-backed rate limits, proxy/request timeouts, per-service circuit breaker state, JSON upstream error responses, Redis reconnect options, and circuit breaker details in `/api/health`. Verified TypeScript builds for API Gateway, all backend services, and the Next.js frontend. Docker runtime E2E could not be started because Docker Desktop/daemon was not running on the machine.
 - 2026-05-29: Fixed registration and login functionality. Removed premature body-parser in the API Gateway (`backend/api-gateway/src/index.ts`) that was consuming request streams and hanging POST requests. Appended the missing `users` table schema to `backend/postgres-init/init.sql` to ensure correct database initialization. Updated the `/auth` frontend page to dynamically hide the login card and center the layout upon successful authentication, and renamed the navigation labels from "Auth" to "Login".
+- 2026-05-29: Expanded all technical/design pattern explanations in `Kien-truc-va-ly-thuyet.md`, including API Gateway, Pub/Sub, Compensating Transaction, Repository, Circuit Breaker, Idempotency, Event Store, Shared Contract, Retry, DLQ, SSE, and Database per Service.
+- 2026-05-29: Expanded the Saga Pattern section in `Kien-truc-va-ly-thuyet.md` with definition, operation flow, happy/failure paths, concrete event examples, choreography rationale, and code linkage.
+- 2026-05-29: Added `Kien-truc-va-ly-thuyet.md`, a Vietnamese architecture theory document based on the current Node.js/TypeScript event-driven microservices implementation.
 - 2026-05-01: Read the project source and rewrote `Context.md` as the canonical working context. Captured runtime architecture, event flow, service responsibilities, route surface, commands, known issues, and the rule that future updates must read and update this file.

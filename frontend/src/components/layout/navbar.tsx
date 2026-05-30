@@ -5,43 +5,52 @@ import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import {
   Activity,
-  Blocks,
-  LayoutDashboard,
   LogIn,
   LogOut,
   Menu,
-  Network,
   Package,
-  ShieldAlert,
+  PackageSearch,
+  ReceiptText,
   ShoppingCart,
-  TrendingUp,
-  Workflow,
+  Store,
+  UserRound,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/lib/constants";
 import { authApi, clearAuthSession, getStoredUser } from "@/lib/api";
+import { CART_UPDATED_EVENT, getCartCount, readCart } from "@/lib/cart";
 
 const iconMap = {
-  LayoutDashboard,
-  Network,
-  Blocks,
-  Workflow,
-  ShieldAlert,
-  TrendingUp,
+  Store,
+  PackageSearch,
   Activity,
   ShoppingCart,
+  ReceiptText,
+  UserRound,
 };
 
 export function Navbar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<ReturnType<typeof getStoredUser>>(null);
+  const [cartCount, setCartCount] = useState(0);
 
   useEffect(() => {
     setUser(getStoredUser());
+    setCartCount(getCartCount(readCart()));
+
+    const syncCart = () => setCartCount(getCartCount(readCart()));
+    window.addEventListener(CART_UPDATED_EVENT, syncCart);
+    window.addEventListener("storage", syncCart);
+
+    return () => {
+      window.removeEventListener(CART_UPDATED_EVENT, syncCart);
+      window.removeEventListener("storage", syncCart);
+    };
   }, []);
 
   async function logout() {
@@ -73,6 +82,11 @@ export function Navbar() {
                     <Button variant={isActive ? "default" : "ghost"} size="sm" className={cn("gap-2 text-sm", isActive && "pointer-events-none")}>
                       <Icon className="h-4 w-4" />
                       {item.label}
+                      {item.href === "/cart" && cartCount > 0 && (
+                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">
+                          {cartCount}
+                        </Badge>
+                      )}
                     </Button>
                   </motion.div>
                 </Link>
@@ -109,6 +123,11 @@ export function Navbar() {
                   <Button variant={isActive ? "default" : "ghost"} className="w-full justify-start gap-2">
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {item.href === "/cart" && cartCount > 0 && (
+                      <Badge variant="secondary" className="ml-auto">
+                        {cartCount}
+                      </Badge>
+                    )}
                   </Button>
                 </Link>
               );

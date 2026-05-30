@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,14 @@ import { Input } from "@/components/ui/input";
 import { authApi, clearAuthSession, getStoredUser, saveAuthSession } from "@/lib/api";
 
 export default function AuthPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthContent />
+    </Suspense>
+  );
+}
+
+function AuthContent() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/";

@@ -10,6 +10,7 @@ import {
   IEventStore,
   createEvent,
   OrderPlacedEvent,
+  createIdempotencyMiddleware,
 } from "@ecommerce/shared";
 import { orderRepository } from "../models/order.repository";
 import { config } from "../config";
@@ -19,9 +20,14 @@ export function createOrderRoutes(
   eventStore: IEventStore,
 ): Router {
   const router = Router();
+  const idempotency = createIdempotencyMiddleware({
+    headerName: "Idempotency-Key",
+    redisUrl: process.env.REDIS_URL || null,
+    ttlMs: 1000 * 60 * 5,
+  });
 
   // POST /api/orders - Create new order
-  router.post("/", async (req: Request, res: Response) => {
+  router.post("/", idempotency, async (req: Request, res: Response) => {
     try {
       const request: CreateOrderRequest = req.body;
 

@@ -72,6 +72,51 @@ export class IdempotencyStore {
 }
 
 /**
+ * Redis-backed Idempotency Store
+ * Stores the result as JSON under a key with TTL (milliseconds)
+ */
+import Redis from "ioredis";
+
+export class RedisIdempotencyStore {
+  private redis: Redis;
+  private defaultTtlMs: number;
+
+  constructor(redisUrl: string, defaultTtlMs = 60_000 * 5) {
+    this.redis = new Redis(redisUrl);
+    this.defaultTtlMs = defaultTtlMs;
+  }
+
+  async check(key: string): Promise<boolean> {
+    const exists = await this.redis.exists(key);
+    return exists === 1;
+  }
+
+  async store(key: string, result: unknown, ttlMs?: number): Promise<void> {
+    const value = JSON.stringify({
+      result,
+      storedAt: new Date().toISOString(),
+    });
+    const ttl = Math.ceil((ttlMs ?? this.defaultTtlMs) / 1000);
+    await this.redis.set(key, value, "EX", ttl);
+  }
+
+  async getResult(key: string): Promise<unknown | null> {
+    const raw = await this.redis.get(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed.result ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+/**
  * Circuit Breaker Pattern
  */
 export enum CircuitState {

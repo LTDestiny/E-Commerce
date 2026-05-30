@@ -9,7 +9,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: "TechSphere Commerce",
-  description: "Web thương mại điện tử máy tính và công nghệ với Event-Driven Architecture.",
+  description: "Web thương mại điện tử máy tính và công nghệ với mua hàng, hồ sơ và lịch sử đơn.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

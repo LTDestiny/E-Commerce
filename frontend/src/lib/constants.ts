@@ -1,12 +1,10 @@
 export const NAV_ITEMS = [
-  { label: "Cửa hàng", href: "/", icon: "LayoutDashboard" },
-  { label: "Mua hàng", href: "/orders", icon: "ShoppingCart" },
+  { label: "Cửa hàng", href: "/", icon: "Store" },
+  { label: "Sản phẩm", href: "/products", icon: "PackageSearch" },
+  { label: "Giỏ hàng", href: "/cart", icon: "ShoppingCart" },
+  { label: "Đơn hàng", href: "/orders", icon: "ReceiptText" },
+  { label: "Hồ sơ", href: "/profile", icon: "UserRound" },
   { label: "Dashboard", href: "/dashboard", icon: "Activity" },
-  { label: "Kiến trúc", href: "/architecture", icon: "Network" },
-  { label: "Patterns", href: "/patterns", icon: "Blocks" },
-  { label: "Event Flow", href: "/event-flow", icon: "Workflow" },
-  { label: "Xử lý lỗi", href: "/error-handling", icon: "ShieldAlert" },
-  { label: "Scale", href: "/scalability", icon: "TrendingUp" },
 ] as const;
 
 export const SERVICES = [
