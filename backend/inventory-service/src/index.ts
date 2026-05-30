@@ -11,6 +11,7 @@ import { registerEventHandlers } from "./handlers/inventory.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
 import { inventoryRepository } from "./models/inventory.repository";
+import { disconnectCache } from "./lib/cache";
 
 async function main() {
   await prisma.$connect();
@@ -47,6 +48,7 @@ async function main() {
 
   process.on("SIGTERM", async () => {
     await eventBus.disconnect();
+    await disconnectCache();
     await prisma.$disconnect();
     process.exit(0);
   });

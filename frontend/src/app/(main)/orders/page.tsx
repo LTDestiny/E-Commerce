@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   AlertCircle,
@@ -59,6 +59,7 @@ const DEFAULT_ADDRESS = {
 };
 
 const categories = ["Tất cả", ...new Set(PRODUCT_CATALOG.map((p) => p.category))];
+const CHECKOUT_COOLDOWN_MS = 3000;
 
 function statusVariant(
   status: string,
@@ -95,6 +96,11 @@ export default function OrdersPage() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [placing, setPlacing] = useState(false);
+  const [checkoutCooldown, setCheckoutCooldown] = useState(false);
+  const checkoutLockRef = useRef(false);
+  const checkoutCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [apiMessage, setApiMessage] = useState<string | null>(null);
   const [customer, setCustomer] = useState({
     name: DEFAULT_ADDRESS.fullName,
@@ -118,11 +124,21 @@ export default function OrdersPage() {
     }
   }, []);
 
+  // 1. Đoạn fetchData và interval 
   useEffect(() => {
     fetchData();
     const interval = window.setInterval(fetchData, 5000);
     return () => window.clearInterval(interval);
   }, [fetchData]);
+
+  // 2. cleanup cho checkoutCooldownTimerRef
+  useEffect(() => {
+    return () => {
+      if (checkoutCooldownTimerRef.current) {
+        clearTimeout(checkoutCooldownTimerRef.current);
+      }
+    };
+  }, []);
 
   const catalog = useMemo(() => {
     const stockById = new Map(inventory.map((item) => [item.productId, item]));
@@ -169,8 +185,20 @@ export default function OrdersPage() {
 
   const placeOrder = async () => {
     if (cartItems.length === 0) return;
+
+    // Client-side rate limiter:
+    // Prevent rapid repeated checkout clicks before React state updates.
+    if (checkoutLockRef.current) {
+      setApiMessage(
+        "Bạn đang gửi đơn hoặc đang trong thời gian chờ. Vui lòng thử lại sau vài giây.",
+      );
+      return;
+    }
+
+    checkoutLockRef.current = true;
     setPlacing(true);
     setApiMessage(null);
+
     try {
       const payload: CreateOrderPayload = {
         customerId: createCustomerId(),
@@ -190,6 +218,7 @@ export default function OrdersPage() {
           country: DEFAULT_ADDRESS.country,
         },
       };
+
       const order = await ordersApi.create(payload);
       setCart({});
       setExpandedOrder(order.id);
@@ -204,6 +233,16 @@ export default function OrdersPage() {
       );
     } finally {
       setPlacing(false);
+      setCheckoutCooldown(true);
+
+      if (checkoutCooldownTimerRef.current) {
+        clearTimeout(checkoutCooldownTimerRef.current);
+      }
+
+      checkoutCooldownTimerRef.current = setTimeout(() => {
+        checkoutLockRef.current = false;
+        setCheckoutCooldown(false);
+      }, CHECKOUT_COOLDOWN_MS);
     }
   };
 
@@ -449,14 +488,18 @@ export default function OrdersPage() {
                 className="w-full"
                 size="lg"
                 onClick={placeOrder}
-                disabled={cartItems.length === 0 || placing}
+                disabled={cartItems.length === 0 || placing || checkoutCooldown}
               >
-                {placing ? (
+                {placing || checkoutCooldown ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <CreditCard className="h-4 w-4" />
                 )}
-                {placing ? "Đang tạo đơn..." : "Checkout"}
+                {placing
+                  ? "Đang tạo đơn..."
+                  : checkoutCooldown
+                    ? "Vui lòng chờ 3 giây..."
+                    : "Checkout"}
               </Button>
             </CardContent>
           </Card>
