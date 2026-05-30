@@ -33,3 +33,4 @@ export { createIdempotencyMiddleware } from "./utils/idempotency-middleware";
 export { KafkaClient } from "./kafka/client";
 export { KafkaEventBus } from "./events/event-bus";
 export { produceMessage } from "./kafka/producer";
+export { checkKafkaConnectivity } from "./kafka/health";
