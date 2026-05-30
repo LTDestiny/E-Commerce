@@ -78,9 +78,14 @@ export function registerEventHandlers(
         );
 
         await eventStore.append(scheduledEvent);
-        await eventBus.publish(EVENT_CHANNELS.SHIPPING_SCHEDULED, scheduledEvent);
+        await eventBus.publish(
+          EVENT_CHANNELS.SHIPPING_SCHEDULED,
+          scheduledEvent,
+        );
 
-        await idempotencyStore.store(idempotencyKey, { shipmentId: shipment.id });
+        await idempotencyStore.store(idempotencyKey, {
+          shipmentId: shipment.id,
+        });
 
         console.log(
           `[${config.serviceName}] ✅ Shipping scheduled for order ${orderId}`,

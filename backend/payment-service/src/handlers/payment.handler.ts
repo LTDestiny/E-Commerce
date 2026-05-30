@@ -92,18 +92,26 @@ export function registerEventHandlers(
           );
 
           await eventStore.append(successEvent);
-          await eventBus.publish(EVENT_CHANNELS.PAYMENT_PROCESSED, successEvent);
-          await idempotencyStore.store(idempotencyKey, { paymentId: payment.id });
+          await eventBus.publish(
+            EVENT_CHANNELS.PAYMENT_PROCESSED,
+            successEvent,
+          );
+          await idempotencyStore.store(idempotencyKey, {
+            paymentId: payment.id,
+          });
 
           console.log(
             `[${config.serviceName}] ✅ Payment processed for order ${orderId}: ${transactionId}`,
           );
         } catch (error) {
           // Detect transient errors (gateway/timeouts) and rethrow for consumer retry/DLQ
-          const msg = (error as Error).message || '';
+          const msg = (error as Error).message || "";
           const isTransient = /timeout|ECONN|gateway/i.test(msg);
 
-          await paymentRepository.updateStatus(payment.id, PaymentStatus.FAILED);
+          await paymentRepository.updateStatus(
+            payment.id,
+            PaymentStatus.FAILED,
+          );
 
           const failEvent = createEvent<PaymentFailedEvent>(
             "PAYMENT_FAILED",

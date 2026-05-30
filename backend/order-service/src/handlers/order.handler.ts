@@ -66,7 +66,12 @@ export function registerEventHandlers(
         );
 
         // Check if both conditions met → Confirm order
-        await tryConfirmOrder(orderId, event.correlationId, eventBus, eventStore);
+        await tryConfirmOrder(
+          orderId,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
 
         await idempotencyStore.store(idempotencyKey, { processed: true });
       } catch (err) {
@@ -110,7 +115,12 @@ export function registerEventHandlers(
         );
 
         // Check if both conditions met → Confirm order
-        await tryConfirmOrder(orderId, event.correlationId, eventBus, eventStore);
+        await tryConfirmOrder(
+          orderId,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
 
         await idempotencyStore.store(idempotencyKey, { processed: true });
       } catch (err) {

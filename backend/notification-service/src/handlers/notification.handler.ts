@@ -45,7 +45,10 @@ export function registerEventHandlers(
           idempotencyStore,
         );
       } catch (err) {
-        console.error(`[${config.serviceName}] Notification handler error:`, err);
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
         throw err;
       }
     },
@@ -72,7 +75,10 @@ export function registerEventHandlers(
           idempotencyStore,
         );
       } catch (err) {
-        console.error(`[${config.serviceName}] Notification handler error:`, err);
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
         throw err;
       }
     },
@@ -99,7 +105,10 @@ export function registerEventHandlers(
           idempotencyStore,
         );
       } catch (err) {
-        console.error(`[${config.serviceName}] Notification handler error:`, err);
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
         throw err;
       }
     },
@@ -126,7 +135,10 @@ export function registerEventHandlers(
           idempotencyStore,
         );
       } catch (err) {
-        console.error(`[${config.serviceName}] Notification handler error:`, err);
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
         throw err;
       }
     },
@@ -153,7 +165,10 @@ export function registerEventHandlers(
           idempotencyStore,
         );
       } catch (err) {
-        console.error(`[${config.serviceName}] Notification handler error:`, err);
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
         throw err;
       }
     },
@@ -210,7 +225,9 @@ async function sendNotification(
   await eventStore.append(sentEvent);
   await eventBus.publish(EVENT_CHANNELS.NOTIFICATION_SENT, sentEvent);
 
-  await idempotencyStore.store(idempotencyKey, { notificationId: notification.id });
+  await idempotencyStore.store(idempotencyKey, {
+    notificationId: notification.id,
+  });
 
   console.log(
     `[${config.serviceName}] 📧 ${type} sent for order ${orderId}: "${subject}"`,
