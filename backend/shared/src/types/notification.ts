@@ -24,6 +24,7 @@ export interface Notification {
   subject: string;
   body: string;
   status: NotificationStatus;
+  isRead?: boolean;
   sentAt?: string;
   createdAt: string;
 }

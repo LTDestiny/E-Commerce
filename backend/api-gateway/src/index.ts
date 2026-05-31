@@ -321,7 +321,8 @@ async function main() {
     if (
       publicPaths.includes(req.path) ||
       req.path.startsWith("/api/inventory") ||
-      req.path.startsWith("/api/events")
+      req.path.startsWith("/api/events") ||
+      req.path === "/api/payments/sepay/webhook"
     ) {
       return next();
     }

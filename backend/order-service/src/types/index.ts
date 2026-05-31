@@ -8,11 +8,13 @@
 /** Raw row returned by Prisma for the Order model. */
 export type OrderRow = {
   id: string;
+  orderCode: string;
   customerId: string;
   items: unknown;
   totalAmount: number;
   shippingAddress: unknown;
   status: string;
+  paymentMethod: string;
   createdAt: Date;
   updatedAt: Date;
 };

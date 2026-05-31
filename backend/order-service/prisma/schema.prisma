@@ -13,11 +13,13 @@ datasource db {
 
 model Order {
   id              String   @id @default(uuid())
+  orderCode       String   @default("")
   customerId      String
   items           Json     // OrderItem[]
   totalAmount     Float
   shippingAddress Json     // ShippingAddress
   status          String   @default("PENDING")
+  paymentMethod   String   @default("SEPAY_QR")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

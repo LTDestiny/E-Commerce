@@ -16,6 +16,39 @@ import {
 import { paymentRepository } from "../models/payment.repository";
 import { config } from "../config";
 
+async function fetchOrder(orderId: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-order-service:4001/api/orders/${orderId}`,
+    `http://order-service:4001/api/orders/${orderId}`,
+    `http://localhost:4001/api/orders/${orderId}`
+  ];
+
+  const headers: Record<string, string> = {};
+  if (clientHeaders) {
+    if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
+    if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
+    if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
+    if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
+  }
+
+  for (const url of urls) {
+    try {
+      console.log(`[PaymentService fetchOrder] Fetching URL: ${url} (has x-user-id: ${!!headers["x-user-id"]})`);
+      const res = await fetch(url, { headers });
+      console.log(`[PaymentService fetchOrder] Response status from order-service: ${res.status}`);
+      if (res.ok) {
+        return await res.json();
+      } else {
+        const text = await res.text();
+        console.log(`[PaymentService fetchOrder] Error body: ${text}`);
+      }
+    } catch (e) {
+      console.error(`[PaymentService fetchOrder] Connection error for ${url}:`, e);
+    }
+  }
+  return null;
+}
+
 export function createPaymentRoutes(
   eventBus: IEventBus,
   eventStore: IEventStore,
@@ -98,6 +131,62 @@ export function createPaymentRoutes(
     }
   });
 
+  router.post("/sepay/create", async (req: Request, res: Response) => {
+    try {
+      const { orderId } = req.body || {};
+      const customerId = String(req.headers["x-user-id"] || "");
+
+      if (!orderId) {
+        res.status(400).json({ error: "Missing orderId" });
+        return;
+      }
+
+      const order = await fetchOrder(orderId, req.headers);
+      if (!order) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+
+      if (order.customerId !== customerId) {
+        res.status(403).json({ error: "Forbidden: Access denied to this order" });
+        return;
+      }
+
+      if (
+        order.status === "PAID" ||
+        order.status === "CONFIRMED" ||
+        order.status === "PAYMENT_COMPLETED"
+      ) {
+        res.status(400).json({ error: "Order is already paid" });
+        return;
+      }
+
+      const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+      const transferContent = `SEPAY ${order.id.slice(0, 8)}`;
+      const qrCode = `https://img.vietqr.io/image/${config.sepay.bankName}-${config.sepay.paymentAccount}-compact2.png?amount=${order.totalAmount}&addInfo=${encodeURIComponent(transferContent)}`;
+      const paymentLink = `https://payment.sepay.vn/t/${order.id}`;
+
+      const payment = await paymentRepository.createSepay(
+        order.id,
+        customerId,
+        order.totalAmount,
+        qrCode,
+        transferContent,
+        expiredAt
+      );
+
+      res.json({
+        qrCode,
+        paymentLink,
+        transferContent,
+        amount: payment.amount,
+        expiredAt: expiredAt.toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create SePay session" });
+    }
+  });
+
   router.post("/sepay/webhook", async (req: Request, res: Response) => {
     try {
       const signature = String(req.header("x-sepay-signature") || "");
@@ -115,54 +204,64 @@ export function createPaymentRoutes(
       }
 
       const payload = JSON.parse(rawBody || "{}");
-      const {
-        orderId,
-        customerId,
-        paymentId,
-        transactionId,
-        amount,
-        status,
-        reason,
-      } = payload || {};
 
-      if (!orderId || !paymentId) {
-        res.status(400).json({ error: "Missing orderId/paymentId" });
+      const amount = Number(payload.transferAmount || payload.amount || 0);
+      const transferContent = String(payload.content || payload.transferContent || payload.code || "").trim();
+      const bankTransactionId = String(payload.id || payload.transactionId || payload.referenceCode || "");
+      const status = String(payload.status || "SUCCESS").toUpperCase();
+
+      if (!bankTransactionId) {
+        res.status(400).json({ error: "Missing bank transaction ID" });
         return;
       }
 
-      const payment = await paymentRepository.findById(paymentId);
+      let payment = null;
+      if (payload.paymentId) {
+        payment = await paymentRepository.findById(payload.paymentId);
+      } else {
+        const payments = await paymentRepository.findAll();
+        payment = payments.find(p => p.transferContent && transferContent.includes(p.transferContent.trim()));
+      }
+
       if (!payment) {
-        res.status(404).json({ error: "Payment not found" });
+        res.status(404).json({ error: "Payment not found matching this transfer content" });
         return;
       }
 
-      if (payment.status === PaymentStatus.COMPLETED) {
-        res.json({ ok: true, duplicated: true });
+      if (payment.status === PaymentStatus.COMPLETED || payment.status === "SUCCESS") {
+        res.json({ ok: true, message: "Duplicate callback - already completed", duplicated: true });
         return;
       }
 
-      if (String(status).toUpperCase() === "SUCCESS") {
+      if (status === "SUCCESS") {
+        if (amount < payment.amount) {
+          res.status(400).json({ error: `Incorrect amount. Expected ${payment.amount}, received ${amount}` });
+          return;
+        }
+
         const updated = await paymentRepository.updateStatus(
           payment.id,
           PaymentStatus.COMPLETED,
-          transactionId || `SEPAY-${payment.id.slice(0, 8)}`,
+          bankTransactionId,
+          new Date()
         );
 
         const processedEvent = createEvent<PaymentProcessedEvent>(
           "PAYMENT_PROCESSED",
           config.serviceName,
           {
-            orderId,
+            orderId: payment.orderId,
             paymentId: payment.id,
-            amount: Number(amount || payment.amount),
-            transactionId: transactionId || `SEPAY-${payment.id.slice(0, 8)}`,
+            amount: payment.amount,
+            transactionId: bankTransactionId,
           },
           payment.idempotencyKey,
           {
             provider: "SEPAY",
             webhook: true,
-            customerId: customerId || payment.customerId,
+            customerId: payment.customerId,
             status: "SUCCESS",
+            paidAt: new Date().toISOString(),
           },
         );
 
@@ -182,16 +281,16 @@ export function createPaymentRoutes(
         "PAYMENT_FAILED",
         config.serviceName,
         {
-          orderId,
+          orderId: payment.orderId,
           paymentId: payment.id,
-          reason: reason || "SePay webhook reported failure",
+          reason: payload.reason || "SePay webhook reported failure",
           retryable: false,
         },
         payment.idempotencyKey,
         {
           provider: "SEPAY",
           webhook: true,
-          customerId: customerId || payment.customerId,
+          customerId: payment.customerId,
           status: "FAILED",
         },
       );
@@ -202,6 +301,60 @@ export function createPaymentRoutes(
       res.json({ ok: true, payment: updated });
     } catch (error) {
       res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  router.post("/sepay/simulate", async (req: Request, res: Response) => {
+    try {
+      const { paymentId, status } = req.body || {};
+      if (!paymentId) {
+        res.status(400).json({ error: "Missing paymentId" });
+        return;
+      }
+
+      const payment = await paymentRepository.findById(paymentId);
+      if (!payment) {
+        res.status(404).json({ error: "Payment not found" });
+        return;
+      }
+
+      const transactionId = `TXN-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      const payload = {
+        orderId: payment.orderId,
+        customerId: payment.customerId,
+        paymentId: payment.id,
+        transactionId,
+        amount: payment.amount,
+        status: status || "SUCCESS",
+        reason: "Simulated payment via development trigger",
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", config.sepay.webhookSecret)
+        .update(rawBody)
+        .digest("hex");
+
+      const port = config.port;
+      const webhookUrl = `http://localhost:${port}${config.sepay.webhookPath}`;
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sepay-signature": signature,
+        },
+        body: rawBody,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Webhook simulation failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
     }
   });
 

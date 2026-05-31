@@ -127,7 +127,7 @@ export function registerEventHandlers(
 
         await orderRepository.updateStatus(
           orderId,
-          OrderStatus.PAYMENT_COMPLETED,
+          OrderStatus.PAID,
         );
         console.log(
           `[${config.serviceName}] Payment processed for order ${orderId}`,
@@ -292,9 +292,13 @@ async function cancelOrder(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): Promise<void> {
+  const status = reason.toLowerCase().includes("expired")
+    ? OrderStatus.EXPIRED
+    : OrderStatus.CANCELLED;
+
   const order = await orderRepository.updateStatus(
     orderId,
-    OrderStatus.CANCELLED,
+    status,
   );
   if (!order) return;
 

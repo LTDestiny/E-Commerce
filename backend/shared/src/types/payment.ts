@@ -9,6 +9,8 @@ export enum PaymentStatus {
   COMPLETED = "COMPLETED",
   FAILED = "FAILED",
   REFUNDED = "REFUNDED",
+  SUCCESS = "SUCCESS",
+  EXPIRED = "EXPIRED",
 }
 
 export enum PaymentMethod {
@@ -30,6 +32,11 @@ export interface Payment {
   status: PaymentStatus;
   transactionId?: string;
   idempotencyKey: string;
+  provider?: string;
+  qrCode?: string;
+  transferContent?: string;
+  paidAt?: string;
+  expiredAt?: string;
   createdAt: string;
   updatedAt: string;
 }

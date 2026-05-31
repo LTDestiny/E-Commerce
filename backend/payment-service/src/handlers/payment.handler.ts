@@ -53,12 +53,19 @@ export function registerEventHandlers(
         }
 
         // Create payment record
-        const paymentMethod = config.paymentMethods.defaultMethod as any;
+        const paymentMethod = (event.payload as any).paymentMethod || config.paymentMethods.defaultMethod;
+        if (paymentMethod === "SEPAY_QR") {
+          console.log(
+            `[${config.serviceName}] SePay QR payment detected for order ${orderId} - skipping automatic processing`,
+          );
+          return;
+        }
+
         const payment = await paymentRepository.create(
           orderId,
           customerId,
           totalAmount,
-          paymentMethod,
+          paymentMethod as any,
         );
 
         try {

@@ -60,7 +60,8 @@ export function createOrderRoutes(
           items: order.items,
           totalAmount: order.totalAmount,
           shippingAddress: order.shippingAddress,
-        },
+          paymentMethod: order.paymentMethod,
+        } as any,
       );
 
       await eventStore.append(event);
@@ -100,6 +101,17 @@ export function createOrderRoutes(
     try {
       const stats = await orderRepository.getStats();
       res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/orders/my-orders - Get customer's own orders
+  router.get("/my-orders", protectRoute, async (req: Request, res: Response) => {
+    try {
+      const user = (req as AuthenticatedRequest).user!;
+      const orders = await orderRepository.findByCustomerId(user.id);
+      res.json(orders);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
