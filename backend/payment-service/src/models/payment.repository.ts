@@ -29,18 +29,40 @@ class PaymentRepository {
     amount: number,
     method: PaymentMethod = PaymentMethod.CREDIT_CARD,
   ): Promise<Payment> {
-    const row = await prisma.payment.create({
-      data: {
-        orderId,
-        customerId,
-        amount,
-        currency: "VND",
-        method,
-        status: PaymentStatus.PENDING,
-        idempotencyKey: `payment-${orderId}`,
-      },
+    const idempotencyKey = `payment-${orderId}`;
+
+    const existing = await prisma.payment.findUnique({
+      where: { idempotencyKey },
     });
-    return toPayment(row);
+
+    if (existing) {
+      return toPayment(existing);
+    }
+
+    try {
+      const row = await prisma.payment.create({
+        data: {
+          orderId,
+          customerId,
+          amount,
+          currency: "VND",
+          method,
+          status: PaymentStatus.PENDING,
+          idempotencyKey,
+        },
+      });
+      return toPayment(row);
+    } catch (error) {
+      const duplicate = await prisma.payment.findUnique({
+        where: { idempotencyKey },
+      });
+
+      if (duplicate) {
+        return toPayment(duplicate);
+      }
+
+      throw error;
+    }
   }
 
   async findById(id: string): Promise<Payment | null> {

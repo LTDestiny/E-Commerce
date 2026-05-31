@@ -17,6 +17,7 @@ import {
   sleep,
   IdempotencyStore,
   RedisIdempotencyStore,
+  retryWithBackoff,
 } from "@ecommerce/shared";
 import { inventoryRepository } from "../models/inventory.repository";
 import { config } from "../config";
@@ -47,7 +48,13 @@ export function registerEventHandlers(
         }
 
         // Simulate processing
-        await sleep(config.simulation.processingDelayMs);
+        await retryWithBackoff(
+          async () => {
+            await sleep(config.simulation.processingDelayMs);
+          },
+          1,
+          500,
+        );
 
         const stockItems = items.map((item) => ({
           productId: item.productId,

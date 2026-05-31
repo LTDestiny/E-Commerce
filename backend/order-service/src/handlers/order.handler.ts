@@ -14,16 +14,25 @@ import {
   createEvent,
   OrderConfirmedEvent,
   OrderCancelledEvent,
+  IdempotencyStore,
+  RedisIdempotencyStore,
+  RedisSagaStore,
 } from "@ecommerce/shared";
 import { orderRepository } from "../models/order.repository";
 import { config } from "../config";
-import { IdempotencyStore, RedisIdempotencyStore } from "@ecommerce/shared";
+
+type SagaState = {
+  stockReserved: boolean;
+  paymentProcessed: boolean;
+  updatedAt: string;
+};
 
 // Track saga state per order
-const sagaState = new Map<
-  string,
-  { stockReserved: boolean; paymentProcessed: boolean }
->();
+const sagaState = new Map<string, SagaState>();
+
+const sagaStore = process.env.REDIS_URL
+  ? new RedisSagaStore(process.env.REDIS_URL, "saga:order:")
+  : null;
 
 export function registerEventHandlers(
   eventBus: IEventBus,
@@ -50,12 +59,17 @@ export function registerEventHandlers(
           return;
         }
 
-        const state = sagaState.get(orderId) || {
-          stockReserved: false,
-          paymentProcessed: false,
-        };
+        const state =
+          (await sagaStore?.get<SagaState>(orderId)) ||
+          sagaState.get(orderId) || {
+            stockReserved: false,
+            paymentProcessed: false,
+            updatedAt: new Date().toISOString(),
+          };
         state.stockReserved = true;
+        state.updatedAt = new Date().toISOString();
         sagaState.set(orderId, state);
+        await sagaStore?.set(orderId, state);
 
         await orderRepository.updateStatus(
           orderId,
@@ -99,12 +113,17 @@ export function registerEventHandlers(
           return;
         }
 
-        const state = sagaState.get(orderId) || {
-          stockReserved: false,
-          paymentProcessed: false,
-        };
+        const state =
+          (await sagaStore?.get<SagaState>(orderId)) ||
+          sagaState.get(orderId) || {
+            stockReserved: false,
+            paymentProcessed: false,
+            updatedAt: new Date().toISOString(),
+          };
         state.paymentProcessed = true;
+        state.updatedAt = new Date().toISOString();
         sagaState.set(orderId, state);
+        await sagaStore?.set(orderId, state);
 
         await orderRepository.updateStatus(
           orderId,
@@ -259,6 +278,8 @@ async function tryConfirmOrder(
   await eventStore.append(event);
   await eventBus.publish(EVENT_CHANNELS.ORDER_CONFIRMED, event);
   sagaState.delete(orderId);
+  await sagaStore?.delete(orderId);
+  await sagaStore?.delete(orderId);
 
   console.log(`[${config.serviceName}] ✅ Order ${orderId} CONFIRMED`);
 }

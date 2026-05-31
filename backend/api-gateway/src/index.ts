@@ -246,6 +246,30 @@ async function main() {
     },
   });
 
+  const sensitiveAuthLimiter = rateLimit({
+    store: createRedisStore("rl:gateway:auth:"),
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: "Too many authentication requests. Please try again later.",
+      code: "AUTH_RATE_LIMIT_EXCEEDED",
+    },
+  });
+
+  const paymentLimiter = rateLimit({
+    store: createRedisStore("rl:gateway:payment:"),
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: "Too many payment requests. Please slow down.",
+      code: "PAYMENT_RATE_LIMIT_EXCEEDED",
+    },
+  });
+
   app.use((req: Request, res: ExpressResponse, next: NextFunction) => {
     if (req.path === "/api/health" || req.path === "/api/events/stream") {
       return next();
@@ -265,6 +289,23 @@ async function main() {
     },
   );
 
+  app.use(
+    "/api/auth",
+    (req: Request, res: ExpressResponse, next: NextFunction) =>
+      sensitiveAuthLimiter(req, res, next),
+  );
+
+  app.use(
+    "/api/payments",
+    (req: Request, res: ExpressResponse, next: NextFunction) => {
+      if (req.method === "GET") {
+        return next();
+      }
+
+      return paymentLimiter(req, res, next);
+    },
+  );
+
   function gatewayAuthMiddleware(req: Request, res: ExpressResponse, next: NextFunction) {
     const publicPaths = [
       "/api/auth/login",
@@ -277,7 +318,11 @@ async function main() {
       "/api/events/stream"
     ];
 
-    if (publicPaths.includes(req.path) || req.path.startsWith("/api/inventory")) {
+    if (
+      publicPaths.includes(req.path) ||
+      req.path.startsWith("/api/inventory") ||
+      req.path.startsWith("/api/events")
+    ) {
       return next();
     }
 
@@ -357,6 +402,7 @@ async function main() {
       Connection: "keep-alive",
       "Access-Control-Allow-Origin": config.cors.origin,
     });
+    res.write(": heartbeat\n\n");
 
     res.write('data: {"type":"CONNECTED","message":"SSE connected"}\n\n');
     sseClients.add(res);

@@ -17,6 +17,10 @@ async function main() {
 
   const app = express();
   app.use(cors({ origin: config.cors.origin }));
+  app.use(
+    config.sepay.webhookPath,
+    express.raw({ type: "application/json" }),
+  );
   app.use(express.json());
 
   const eventBus = process.env.KAFKA_BOOTSTRAP_SERVERS

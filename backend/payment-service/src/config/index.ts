@@ -17,4 +17,16 @@ export const config = {
     processingDelayMs: 2000,
     failureRate: 0.1, // 10% chance of failure for demo
   },
+  sepay: {
+    enabled: (process.env.PAYMENT_METHOD || "SEPAY_QR") === "SEPAY_QR",
+    providerName: process.env.SEPAY_PROVIDER_NAME || "SePay",
+    paymentAccount: process.env.SEPAY_PAYMENT_ACCOUNT || "880123456789",
+    bankName: process.env.SEPAY_BANK_NAME || "VietQR Demo Bank",
+    qrTemplate: process.env.SEPAY_QR_TEMPLATE || "SEPAY-{orderId}-{amount}",
+    webhookSecret: process.env.SEPAY_WEBHOOK_SECRET || "dev_sepay_webhook_secret",
+    webhookPath: process.env.SEPAY_WEBHOOK_PATH || "/api/payments/sepay/webhook",
+  },
+  paymentMethods: {
+    defaultMethod: process.env.PAYMENT_METHOD || "SEPAY_QR",
+  },
 };

@@ -12,6 +12,7 @@ import {
   IEventStore,
   createEvent,
   NotificationSentEvent,
+  retryWithBackoff,
 } from "@ecommerce/shared";
 import { notificationRepository } from "../models/notification.repository";
 import { config } from "../config";
@@ -196,12 +197,11 @@ async function sendNotification(
     return;
   }
 
-  const notification = await notificationRepository.create(
-    orderId,
-    customerId,
-    type,
-    subject,
-    body,
+  const notification = await retryWithBackoff(
+    () =>
+      notificationRepository.create(orderId, customerId, type, subject, body),
+    2,
+    300,
   );
 
   // Simulate sending (in production: use email/SMS/push service)

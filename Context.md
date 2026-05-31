@@ -71,9 +71,9 @@ Shared package:
 
 - `backend/shared/src/types/*.ts`: domain DTOs, statuses, event interfaces.
 - `backend/shared/src/types/events.ts`: all domain events and Redis channel names.
-- `backend/shared/src/events/event-bus.ts`: `RedisEventBus`, `createEvent`.
+- `backend/shared/src/events/event-bus.ts`: `RedisEventBus`, `KafkaEventBus`, `createEvent`, Redis DLQ fallback for failed events.
 - `backend/shared/src/events/event-store.ts`: in-memory event store, mostly dev/reference.
-- `backend/shared/src/utils/index.ts`: IDs, sleep, retry, in-memory idempotency store, circuit breaker.
+- `backend/shared/src/utils/index.ts`: IDs, sleep, retry, in-memory idempotency store, Redis-backed idempotency store, circuit breaker.
 
 Infrastructure:
 
@@ -85,14 +85,20 @@ API Gateway:
 
 - File: `backend/api-gateway/src/index.ts`
 - Proxies:
+  - `/api/auth` -> Auth Service
+  - `/api/users` -> Auth Service
   - `/api/orders` -> Order Service
   - `/api/payments` -> Payment Service
   - `/api/inventory` -> Inventory Service
   - `/api/shipments` -> Shipping Service
   - `/api/notifications` -> Notification Service
+- Gateway hardening:
+  - Redis-backed rate limiting for general API traffic, order creation, auth, and payment write operations.
+  - Proxy/request timeouts and per-service circuit breaker state.
+  - JWT auth middleware that forwards user context headers to services.
 - Health aggregation: `GET /api/health`
 - SSE stream: `GET /api/events/stream`
-- SSE subscribes to every channel in `EVENT_CHANNELS` and broadcasts events to connected frontend clients.
+- SSE subscribes to event channels and broadcasts events to connected frontend clients.
 
 ### Frontend
 
@@ -165,7 +171,7 @@ Failure path:
 
 Important implementation detail:
 
-- `OrderService` saga state is in memory. If the service restarts mid-saga, it can lose whether stock/payment already completed.
+- `OrderService` saga state is stored in Redis when available, with in-memory fallback. This reduces loss on restart but still depends on Redis availability.
 - Each service appends events to its own DB, so there is no single global event store query across all services.
 
 ## Data Model
@@ -224,7 +230,10 @@ Simulation:
 
 - Delay: 2000ms.
 - Failure rate: 10%.
-- In-memory idempotency store keyed as `payment-${orderId}`.
+- Default payment method is `SEPAY_QR`.
+- Idempotency is persisted with Redis when available, keyed as `payment-${orderId}`.
+- Payment repository reuses existing rows safely if a retry races with duplicate create.
+- Sepay support includes payment intent payload generation and webhook callback validation.
 
 ### Shipping Service
 
@@ -358,10 +367,10 @@ These are not fixed unless a task asks for them.
 - `payment.routes.ts` and `shipping.routes.ts` declare generic `/:id` before `/order/:orderId`.
 - `ShippingService` uses a placeholder address because `ORDER_CONFIRMED` lacks `shippingAddress`.
 - `InventoryService` config includes `stockFailureRate`, but reservation logic currently only fails from actual insufficient stock.
-- Dead Letter Queue is a TODO in `RedisEventBus.handleMessage`, not implemented.
-- Retry utility exists but is not wired into event handling.
-- Circuit breaker is only used in Payment Service simulation.
-- Idempotency is in-memory plus DB unique key, but duplicate handling in `paymentRepository.create` can still throw if the service restarts after a prior payment row exists.
+- Redis runtime now has a basic failed-event queue/DLQ path by publishing failed events into dedicated `dlq:*` channels, but it is not yet a durable broker-level DLQ.
+- Retry with backoff is wired into selected side-effect handlers and Redis event handler dispatch, but not every code path yet.
+- Circuit breaker is used in Payment Service simulation and Gateway upstream protection.
+- Idempotency is backed by Redis when available plus DB uniqueness for payments, and saga state is now Redis-backed when Redis is available.
 - No automated tests are present.
 - Root `README.md` is deleted in the current Git worktree according to `git status`; do not restore or revert unless requested.
 - `backend/docker-compose.yml` and `backend/frontend.Dockerfile` have existing uncommitted changes; preserve user changes unless the task explicitly targets them.
@@ -406,6 +415,7 @@ Architecture/design docs:
 
 ## Update Log
 
+- 2026-05-31: Switched the worktree to `feature/cart-fixing` and started production-hardening pass. Added a Sepay-oriented payment method default, safer payment idempotency reuse, payment intent/webhook support, Redis-backed saga state, and event metadata support for richer payment auditing and failed-event routing.
 - 2026-05-29: Fixed registration and login functionality. Removed premature body-parser in the API Gateway (`backend/api-gateway/src/index.ts`) that was consuming request streams and hanging POST requests. Appended the missing `users` table schema to `backend/postgres-init/init.sql` to ensure correct database initialization. Updated the `/auth` frontend page to dynamically hide the login card and center the layout upon successful authentication, and renamed the navigation labels from "Auth" to "Login". Implemented separate, persistent shopping carts for each user account on `/orders` using dynamic React states and localStorage keyed by user IDs, and linked the checkout customerId to the active user session.
 - 2026-05-30: Merged `origin/feature/architecture-characteristics-clean` and `origin/feature/login+logout` into `master` (`login+logout` was already contained in the architecture branch). Converted the frontend from architecture/demo pages into an ecommerce storefront with products, persistent cart, checkout, order history, profile, and operations dashboard. Removed architecture/pattern/event-flow/error/scalability routes from the app navigation and source tree. Updated API Gateway rate limiting to use Redis via `rate-limit-redis` instead of process memory.
 - 2026-05-30: Hardened API Gateway for service instability and overload: added env-driven Redis-backed rate limits, proxy/request timeouts, per-service circuit breaker state, JSON upstream error responses, Redis reconnect options, and circuit breaker details in `/api/health`. Verified TypeScript builds for API Gateway, all backend services, and the Next.js frontend. Docker runtime E2E could not be started because Docker Desktop/daemon was not running on the machine.

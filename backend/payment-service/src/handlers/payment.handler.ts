@@ -53,10 +53,12 @@ export function registerEventHandlers(
         }
 
         // Create payment record
+        const paymentMethod = config.paymentMethods.defaultMethod as any;
         const payment = await paymentRepository.create(
           orderId,
           customerId,
           totalAmount,
+          paymentMethod,
         );
 
         try {
@@ -133,7 +135,6 @@ export function registerEventHandlers(
           );
 
           if (isTransient) {
-            // Rethrow to allow KafkaEventBus to retry and move message to DLQ after retries
             throw error;
           }
         }
