@@ -340,7 +340,7 @@ async function main() {
       req.headers["x-user-id"] = decoded.id;
       req.headers["x-user-email"] = decoded.email;
       req.headers["x-user-role"] = decoded.role;
-      req.headers["x-user-name"] = decoded.name;
+      req.headers["x-user-name"] = encodeURIComponent(decoded.name || "");
 
       next();
     } catch (err) {
