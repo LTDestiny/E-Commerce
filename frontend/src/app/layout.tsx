@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar } from "@/components/layout/navbar";
+import { AIChatBox } from "@/components/layout/ai-chat-box";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
             {children}
           </main>
+          <AIChatBox />
         </TooltipProvider>
       </body>
     </html>

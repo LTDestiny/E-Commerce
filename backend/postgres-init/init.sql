@@ -26,11 +26,13 @@ GRANT ALL PRIVILEGES ON DATABASE ecommerce_auth TO postgres;
 
 CREATE TABLE "orders" (
     "id" TEXT NOT NULL DEFAULT gen_random_uuid()::TEXT,
+    "orderCode" TEXT NOT NULL DEFAULT '',
     "customerId" TEXT NOT NULL,
     "items" JSONB NOT NULL,
     "totalAmount" DOUBLE PRECISION NOT NULL,
     "shippingAddress" JSONB NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "paymentMethod" TEXT NOT NULL DEFAULT 'SEPAY_QR',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "orders_pkey" PRIMARY KEY ("id")
@@ -65,6 +67,11 @@ CREATE TABLE "payments" (
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "transactionId" TEXT,
     "idempotencyKey" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'SEPAY',
+    "qrCode" TEXT,
+    "transferContent" TEXT,
+    "paidAt" TIMESTAMP(3),
+    "expiredAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
