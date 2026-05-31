@@ -64,6 +64,8 @@ services:
     container_name: ecommerce-auth-service
     ports:
       - "4006:4006"
+    env_file:
+      - auth-service/.env
     environment:
       PORT: 4006
       CORS_ORIGIN: http://localhost:3000

@@ -5,6 +5,7 @@ import Redis from "ioredis";
 import crypto from "crypto";
 import { config } from "./config";
 import { prisma } from "./lib/prisma";
+import { sendResetPasswordEmail } from "./lib/mailer";
 import {
   comparePassword,
   createRefreshJti,
@@ -19,6 +20,10 @@ import {
 
 const REFRESH_COOKIE = "refresh_token";
 const redisClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+
+redisClient.on("error", (err) => {
+  console.error("[AuthService] Redis client error:", err);
+});
 
 function publicUser(user: { id: string; name: string; email: string; role: string }) {
   return { id: user.id, name: user.name, email: user.email, role: user.role };
@@ -224,75 +229,112 @@ async function main() {
   });
 
   // POST /api/auth/forgot-password
-  app.post("/api/auth/forgot-password", async (req, res) => {
-    const { email } = req.body ?? {};
-    if (!email) return res.status(400).json({ error: "Email is required" });
-    const normalizedEmail = String(email).toLowerCase().trim();
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user) {
-      console.log(`[AuthService] Password reset requested for non-existent email: ${normalizedEmail}`);
-      return res.json({ message: "If your email exists in our system, a reset link has been sent." });
-    }
-
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { resetPasswordToken: resetToken, resetPasswordExpires }
-    });
-
-    const event = {
-      id: crypto.randomUUID(),
-      type: "PASSWORD_RESET_REQUESTED",
-      source: "AuthService",
-      timestamp: new Date().toISOString(),
-      correlationId: crypto.randomUUID(),
-      payload: {
-        userId: user.id,
-        email: user.email,
-        resetToken,
-        resetLink: `${config.cors.origin}/auth?mode=reset&token=${resetToken}`
+  app.post("/api/auth/forgot-password", async (req, res, next) => {
+    try {
+      const { email } = req.body ?? {};
+      if (!email) return res.status(400).json({ error: "Email is required" });
+      const normalizedEmail = String(email).toLowerCase().trim();
+      const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+      if (!user) {
+        console.log(`[AuthService] Password reset requested for non-existent email: ${normalizedEmail}`);
+        return res.json({ message: "If your email exists in our system, a reset link has been sent." });
       }
-    };
-    await redisClient.publish("notifications.events", JSON.stringify(event));
-    console.log(`[AuthService] Generated reset token for ${user.email} and emitted event`);
 
-    return res.json({ message: "If your email exists in our system, a reset link has been sent." });
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { resetPasswordToken: resetToken, resetPasswordExpires }
+      });
+
+      const resetLink = `${config.cors.origin}/auth?mode=reset&token=${resetToken}`;
+
+      // 1. Send Gmail message (with its own try/catch to avoid blocking the API flow if SMTP fails)
+      try {
+        await sendResetPasswordEmail(user.email, resetLink);
+        console.log(`[AuthService] Password reset email successfully sent to ${user.email}`);
+      } catch (mailError) {
+        console.error(`[AuthService] Failed to send password reset email to ${user.email}:`, mailError);
+      }
+
+      // 2. Publish event to Redis (with its own try/catch)
+      const event = {
+        id: crypto.randomUUID(),
+        type: "PASSWORD_RESET_REQUESTED",
+        source: "AuthService",
+        timestamp: new Date().toISOString(),
+        correlationId: crypto.randomUUID(),
+        payload: {
+          userId: user.id,
+          email: user.email,
+          resetToken,
+          resetLink
+        }
+      };
+      try {
+        await redisClient.publish("notifications.events", JSON.stringify(event));
+        console.log(`[AuthService] Emitted PASSWORD_RESET_REQUESTED event for user ${user.id}`);
+      } catch (redisError) {
+        console.error(`[AuthService] Failed to publish PASSWORD_RESET_REQUESTED event:`, redisError);
+      }
+
+      return res.json({ message: "If your email exists in our system, a reset link has been sent." });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // POST /api/auth/reset-password
-  app.post("/api/auth/reset-password", async (req, res) => {
-    const { token, password } = req.body ?? {};
-    if (!token || !password) return res.status(400).json({ error: "Token and password are required" });
+  app.post("/api/auth/reset-password", async (req, res, next) => {
+    try {
+      const { token, password } = req.body ?? {};
+      if (!token || !password) return res.status(400).json({ error: "Token and password are required" });
 
-    const user = await prisma.user.findUnique({ where: { resetPasswordToken: String(token) } });
-    if (!user || !user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
-      return res.status(400).json({ error: "Invalid or expired password reset token" });
+      const user = await prisma.user.findUnique({ where: { resetPasswordToken: String(token) } });
+      if (!user || !user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
+        return res.status(400).json({ error: "Invalid or expired password reset token" });
+      }
+
+      const passwordHash = await hashPassword(String(password));
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash,
+          resetPasswordToken: null,
+          resetPasswordExpires: null,
+          refreshTokenHash: null,
+          refreshTokenJti: null,
+          refreshTokenExp: null
+        }
+      });
+
+      const stream = redisClient.scanStream({ match: `auth:refresh:${user.id}:*` });
+      stream.on("data", async (keys) => {
+        if (keys.length > 0) {
+          try {
+            await redisClient.del(...keys);
+          } catch (delError) {
+            console.error("[AuthService] Failed to delete revoked refresh tokens from Redis:", delError);
+          }
+        }
+      });
+      stream.on("error", (err) => {
+        console.error("[AuthService] Redis scan stream error:", err);
+      });
+
+      console.log(`[AuthService] Password reset successfully for user ${user.id}`);
+      return res.json({ ok: true, message: "Password has been reset successfully. Please log in with your new password." });
+    } catch (err) {
+      next(err);
     }
+  });
 
-    const passwordHash = await hashPassword(String(password));
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        resetPasswordToken: null,
-        resetPasswordExpires: null,
-        refreshTokenHash: null,
-        refreshTokenJti: null,
-        refreshTokenExp: null
-      }
-    });
-
-    const stream = redisClient.scanStream({ match: `auth:refresh:${user.id}:*` });
-    stream.on("data", async (keys) => {
-      if (keys.length > 0) {
-        await redisClient.del(...keys);
-      }
-    });
-
-    console.log(`[AuthService] Password reset successfully for user ${user.id}`);
-    return res.json({ ok: true, message: "Password has been reset successfully. Please log in with your new password." });
+  // Global Express Error Handler
+  app.use((err: any, _req: Request, res: Response, _next: any) => {
+    console.error("[AuthService] Unhandled route error:", err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: "Internal server error", detail: err?.message || String(err) });
   });
 
   app.get("/health", (_req, res) => res.json({ service: config.serviceName, status: "healthy", uptime: process.uptime() }));

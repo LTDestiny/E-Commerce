@@ -43,6 +43,10 @@ export function Navbar() {
   // phụ thuộc localStorage (user, cartCount) — tránh layout shift
   const [mounted, setMounted] = useState(false);
 
+  const dynamicNavItems = mounted && user?.role === "ADMIN"
+    ? [...NAV_ITEMS, { label: "Quản trị", href: "/admin/orders", icon: "PackageSearch" as const }]
+    : NAV_ITEMS;
+
   useEffect(() => {
     const syncSession = () => {
       setUser(getStoredUser());
@@ -105,7 +109,7 @@ export function Navbar() {
 
           {/* Desktop nav */}
           <div className="hidden flex-1 items-center justify-end gap-1 overflow-hidden md:flex">
-            {NAV_ITEMS.map((item) => {
+            {dynamicNavItems.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (
@@ -178,7 +182,7 @@ export function Navbar() {
           className="border-t md:hidden"
         >
           <div className="space-y-1 px-4 py-3">
-            {NAV_ITEMS.map((item) => {
+            {dynamicNavItems.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (

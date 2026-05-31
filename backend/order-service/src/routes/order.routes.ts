@@ -77,12 +77,14 @@ export function createOrderRoutes(
     }
   });
 
-  // GET /api/orders - List orders (Users see their own, Admins see all)
+  // GET /api/orders - List orders (Users see their own, Admins see all via ?all=true)
   router.get("/", protectRoute, async (req: Request, res: Response) => {
     try {
       const user = (req as AuthenticatedRequest).user!;
+      const showAll = req.query.all === "true";
+      
       let orders;
-      if (user.role === "ADMIN") {
+      if (user.role === "ADMIN" && showAll) {
         orders = await orderRepository.findAll();
       } else {
         orders = await orderRepository.findByCustomerId(user.id);

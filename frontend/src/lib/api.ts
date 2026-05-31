@@ -171,7 +171,7 @@ export const ordersApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  list: () => fetchApi<Order[]>("/api/orders"),
+  list: (all?: boolean) => fetchApi<Order[]>(`/api/orders${all ? "?all=true" : ""}`),
   get: (id: string) => fetchApi<Order>(`/api/orders/${id}`),
   getEvents: (id: string) => fetchApi<StoredEvent[]>(`/api/orders/${id}/events`),
   getStats: () => fetchApi<OrderStats>("/api/orders/stats"),
