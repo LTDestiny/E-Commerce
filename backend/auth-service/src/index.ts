@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import cookieParser from "cookie-parser";
 import Redis from "ioredis";
 import crypto from "crypto";
@@ -27,6 +27,88 @@ redisClient.on("error", (err) => {
 
 function publicUser(user: { id: string; name: string; email: string; role: string }) {
   return { id: user.id, name: user.name, email: user.email, role: user.role };
+}
+
+async function requireAdmin(req: Request, res: Response): Promise<JwtUser | null> {
+  const gatewayRole = req.headers["x-user-role"];
+  const gatewayUserId = req.headers["x-user-id"];
+
+  if (gatewayRole === "ADMIN" && gatewayUserId) {
+    return {
+      id: String(gatewayUserId),
+      email: String(req.headers["x-user-email"] || ""),
+      name: decodeURIComponent(String(req.headers["x-user-name"] || "Admin")),
+      role: "ADMIN",
+    };
+  }
+
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return null;
+  }
+
+  try {
+    const user = verifyAccessToken(auth.slice(7));
+    if (user.role !== "ADMIN") {
+      res.status(403).json({ error: "Forbidden" });
+      return null;
+    }
+    return user;
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+    return null;
+  }
+}
+
+async function ensureDemoUsers() {
+  const adminEmail = (process.env.ADMIN_EMAIL || "admin@techsphere.local").toLowerCase().trim();
+  const adminPassword = process.env.ADMIN_PASSWORD || "Admin@123456";
+  const adminName = process.env.ADMIN_NAME || "Admin User";
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: { role: "ADMIN", name: adminName },
+    create: {
+      name: adminName,
+      email: adminEmail,
+      role: "ADMIN",
+      passwordHash: await hashPassword(adminPassword),
+    },
+  });
+
+  const demoPasswordHash = await hashPassword(process.env.DEMO_USER_PASSWORD || "Demo@123456");
+  const demoUsers = [
+    { id: "user-customer-jordan", name: "Jordan Smith", email: "jordan.smith@techsphere.local" },
+    { id: "user-customer-sarah", name: "Sarah Connor", email: "sarah.connor@techsphere.local" },
+    { id: "user-customer-arthur", name: "Arthur Morgan", email: "arthur.morgan@techsphere.local" },
+    { id: "user-customer-liam", name: "Liam Neesson", email: "liam.neesson@techsphere.local" },
+  ];
+
+  for (const user of demoUsers) {
+    const existingById = await prisma.user.findUnique({ where: { id: user.id } });
+    if (existingById) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { name: user.name, role: "USER" },
+      });
+      continue;
+    }
+
+    await prisma.user.upsert({
+      where: { email: user.email },
+      update: { name: user.name },
+      create: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: "USER",
+        passwordHash: demoPasswordHash,
+      },
+    });
+  }
+
+  console.log(`[AuthService] Ensured admin account ${adminEmail} and ${demoUsers.length} demo users`);
 }
 
 function setRefreshCookie(res: Response, token: string) {
@@ -60,9 +142,22 @@ async function issueTokens(user: JwtUser, res: Response) {
 
 async function main() {
   await prisma.$connect();
+  await ensureDemoUsers();
   const app = express();
+  const allowedOrigins = new Set(config.cors.allowedOrigins);
+  const corsOptions: CorsOptions = {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
 
-  app.use(cors({ origin: config.cors.origin, credentials: true }));
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+    credentials: true,
+  };
+
+  app.use(cors(corsOptions));
   app.use(express.json());
   app.use(cookieParser());
 
@@ -228,6 +323,85 @@ async function main() {
     }
   });
 
+  // GET /api/users - Admin customer/account list
+  app.get("/api/users", async (req, res) => {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return res.json(users.map((user) => ({
+      ...publicUser(user),
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    })));
+  });
+
+  // GET /api/users/:id - Admin account detail
+  app.get("/api/users/:id", async (req, res) => {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+    return res.json({
+      ...publicUser(user),
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    });
+  });
+
+  // PATCH /api/users/:id/role - Admin role management
+  app.patch("/api/users/:id/role", async (req, res) => {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+
+    const role = String(req.body?.role || "").toUpperCase();
+    if (!["USER", "ADMIN"].includes(role)) {
+      return res.status(400).json({ error: "Role must be USER or ADMIN" });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { role },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return res.json({
+      ...publicUser(user),
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    });
+  });
+
   // POST /api/auth/forgot-password
   app.post("/api/auth/forgot-password", async (req, res, next) => {
     try {
@@ -248,7 +422,7 @@ async function main() {
         data: { resetPasswordToken: resetToken, resetPasswordExpires }
       });
 
-      const resetLink = `${config.cors.origin}/auth?mode=reset&token=${resetToken}`;
+      const resetLink = `${config.cors.primaryOrigin}/auth?mode=reset&token=${resetToken}`;
 
       // 1. Send Gmail message (with its own try/catch to avoid blocking the API flow if SMTP fails)
       try {

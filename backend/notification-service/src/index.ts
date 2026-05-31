@@ -11,8 +11,52 @@ import { registerEventHandlers } from "./handlers/notification.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
 
+async function ensureNotificationAdminData() {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "isRead" BOOLEAN NOT NULL DEFAULT false`);
+
+  const count = await prisma.notification.count();
+  if (count > 0) return;
+
+  const demoNotifications = [
+    {
+      orderId: "order-ts-9421",
+      customerId: "user-customer-jordan",
+      type: "EMAIL",
+      subject: "Order TS-9421 delivered",
+      body: "Your order has been delivered successfully.",
+      status: "SENT",
+      isRead: false,
+      sentAt: new Date(),
+    },
+    {
+      orderId: "order-ts-9420",
+      customerId: "user-customer-sarah",
+      type: "EMAIL",
+      subject: "Payment pending for TS-9420",
+      body: "Please complete payment to continue fulfillment.",
+      status: "PENDING",
+      isRead: false,
+      sentAt: null,
+    },
+    {
+      orderId: "order-ts-9419",
+      customerId: "user-customer-arthur",
+      type: "IN_APP",
+      subject: "Shipment created for TS-9419",
+      body: "Carrier has accepted the shipment.",
+      status: "SENT",
+      isRead: true,
+      sentAt: new Date(),
+    },
+  ];
+
+  await prisma.notification.createMany({ data: demoNotifications });
+  console.log(`[${config.serviceName}] Seeded ${demoNotifications.length} admin demo notifications`);
+}
+
 async function main() {
   await prisma.$connect();
+  await ensureNotificationAdminData();
   console.log(`[${config.serviceName}] Connected to PostgreSQL`);
 
   const app = express();

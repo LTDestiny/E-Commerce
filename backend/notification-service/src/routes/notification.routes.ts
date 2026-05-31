@@ -3,7 +3,7 @@
 // ==========================================
 
 import { Router, Request, Response } from "express";
-import { IEventBus, IEventStore } from "@ecommerce/shared";
+import { IEventBus, IEventStore, NotificationStatus } from "@ecommerce/shared";
 import { notificationRepository } from "../models/notification.repository";
 
 export function createNotificationRoutes(
@@ -21,7 +21,10 @@ export function createNotificationRoutes(
         return;
       }
       
-      const notifications = await notificationRepository.findByCustomerId(String(customerId));
+      const userRole = String(req.headers["x-user-role"] || "");
+      const notifications = userRole === "ADMIN"
+        ? await notificationRepository.findAll()
+        : await notificationRepository.findByCustomerId(String(customerId));
       res.json(notifications);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -35,6 +38,37 @@ export function createNotificationRoutes(
         req.params.orderId,
       );
       res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /api/notifications/:id - Notification detail
+  router.get("/:id", async (req: Request, res: Response) => {
+    try {
+      const notification = await notificationRepository.findById(req.params.id);
+      if (!notification) {
+        res.status(404).json({ error: "Notification not found" });
+        return;
+      }
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /api/notifications/:id/resend - Mark as sent again for admin resend flow
+  router.post("/:id/resend", async (req: Request, res: Response) => {
+    try {
+      const notification = await notificationRepository.updateStatus(
+        req.params.id,
+        NotificationStatus.SENT,
+      );
+      if (!notification) {
+        res.status(404).json({ error: "Notification not found" });
+        return;
+      }
+      res.json({ ok: true, notification });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }

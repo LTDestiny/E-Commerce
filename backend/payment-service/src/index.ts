@@ -4,15 +4,53 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus, KafkaEventBus, createEvent } from "@ecommerce/shared";
+import {
+  RedisEventBus,
+  KafkaEventBus,
+  createEvent,
+  checkKafkaConnectivity,
+} from "@ecommerce/shared";
 import { config } from "./config";
 import { createPaymentRoutes } from "./routes/payment.routes";
 import { registerEventHandlers } from "./handlers/payment.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
 
+async function ensurePaymentAdminData() {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "provider" TEXT NOT NULL DEFAULT 'SEPAY'`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "qrCode" TEXT`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "transferContent" TEXT`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP(3)`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "expiredAt" TIMESTAMP(3)`);
+
+  const count = await prisma.payment.count();
+  if (count > 0) return;
+
+  const demoPayments = [
+    { orderId: "order-ts-9421", customerId: "user-customer-jordan", amount: 1205800, method: "STRIPE", status: "COMPLETED", transactionId: "ch_3Nf9Z8L2o9X" },
+    { orderId: "order-ts-9420", customerId: "user-customer-sarah", amount: 499000, method: "PAYPAL", status: "PENDING", transactionId: "txn_55029411" },
+    { orderId: "order-ts-9419", customerId: "user-customer-arthur", amount: 2840500, method: "BANK_TRANSFER", status: "COMPLETED", transactionId: "bnk_884210" },
+    { orderId: "order-ts-9418", customerId: "user-customer-liam", amount: 120000, method: "SEPAY_QR", status: "FAILED", transactionId: null },
+  ];
+
+  for (const payment of demoPayments) {
+    await prisma.payment.create({
+      data: {
+        ...payment,
+        currency: "VND",
+        provider: payment.method === "STRIPE" ? "Stripe Gateway" : "SEPAY",
+        idempotencyKey: `admin-seed-${payment.orderId}`,
+        paidAt: payment.status === "COMPLETED" ? new Date() : null,
+      },
+    });
+  }
+
+  console.log(`[${config.serviceName}] Seeded ${demoPayments.length} admin demo payments`);
+}
+
 async function main() {
   await prisma.$connect();
+  await ensurePaymentAdminData();
   console.log(`[${config.serviceName}] Connected to PostgreSQL`);
 
   const app = express();
@@ -86,19 +124,13 @@ async function main() {
     }
   }, 5 * 60 * 1000);
 
-  app.get("/health", (_req, res) => {
-    (async () => {
+  app.get("/health", async (_req, res) => {
+    try {
       let kafkaConnected = null;
       if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
-        try {
-          const { checkKafkaConnectivity } =
-            await import("@ecommerce/shared");
-          kafkaConnected = await checkKafkaConnectivity(
-            process.env.KAFKA_BOOTSTRAP_SERVERS,
-          );
-        } catch {
-          kafkaConnected = false;
-        }
+        kafkaConnected = await checkKafkaConnectivity(
+          process.env.KAFKA_BOOTSTRAP_SERVERS,
+        ).catch(() => false);
       }
 
       res.json({
@@ -108,7 +140,16 @@ async function main() {
         kafka: kafkaConnected,
         timestamp: new Date().toISOString(),
       });
-    })();
+    } catch (error) {
+      console.error(`[${config.serviceName}] Health check failed:`, error);
+      res.status(503).json({
+        service: config.serviceName,
+        status: "degraded",
+        uptime: process.uptime(),
+        kafka: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   app.listen(config.port, () => {

@@ -35,12 +35,15 @@ import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/shared/page-header";
 import { useEventStream, type SSEEvent } from "@/hooks/use-event-stream";
 import {
+  getStoredUser,
   healthApi,
   ordersApi,
   paymentsApi,
   shipmentsApi,
   notificationsApi,
+  type AuthUser,
   type HealthStatus,
+  type Order,
   type OrderStats,
 } from "@/lib/api";
 import { formatVND } from "@/lib/commerce";
@@ -75,6 +78,7 @@ function eventStyle(type: string) {
 
 export default function DashboardPage() {
   const { events, connected, clearEvents } = useEventStream();
+  const [viewer, setViewer] = useState<AuthUser | null>(null);
   const [stats, setStats] = useState<OrderStats | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [counts, setCounts] = useState({
@@ -84,9 +88,44 @@ export default function DashboardPage() {
   });
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const syncViewer = () => setViewer(getStoredUser());
+
+    syncViewer();
+    window.addEventListener("auth-changed", syncViewer);
+
+    return () => {
+      window.removeEventListener("auth-changed", syncViewer);
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      if (viewer?.role !== "ADMIN") {
+        const orders = await ordersApi.list().catch(() => [] as Order[]);
+        const byStatus = orders.reduce<Record<string, number>>((acc, order) => {
+          acc[order.status] = (acc[order.status] ?? 0) + 1;
+          return acc;
+        }, {});
+        const totalRevenue = orders
+          .filter((order) => order.status !== "CANCELLED" && order.status !== "FAILED")
+          .reduce((sum, order) => sum + order.totalAmount, 0);
+
+        setStats({
+          total: orders.length,
+          byStatus,
+          totalRevenue,
+        });
+        setHealth(null);
+        setCounts({
+          payments: 0,
+          shipments: 0,
+          notifications: 0,
+        });
+        return;
+      }
+
       const [nextStats, nextHealth, payments, shipments, notifications] =
         await Promise.all([
           ordersApi.getStats().catch(() => null),
@@ -105,13 +144,14 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [viewer?.role]);
 
   useEffect(() => {
+    if (!viewer) return;
     refresh();
     const interval = window.setInterval(refresh, 10000);
     return () => window.clearInterval(interval);
-  }, [refresh]);
+  }, [viewer, refresh]);
 
   useEffect(() => {
     if (events[0]?.type?.startsWith("ORDER_")) refresh();
@@ -218,7 +258,7 @@ export default function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {health?.services?.length ? (
+              {viewer?.role === "ADMIN" && health?.services?.length ? (
                 health.services.map((service) => (
                   <div
                     key={service.name}
@@ -237,16 +277,26 @@ export default function DashboardPage() {
                     </Badge>
                   </div>
                 ))
-              ) : (
+              ) : viewer?.role === "ADMIN" ? (
                 <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
                   Không lấy được health. Kiểm tra API Gateway tại port 4000.
                 </div>
+              ) : (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  Tài khoản user chỉ hiển thị tổng quan đơn hàng cá nhân.
+                </div>
               )}
               <Separator />
-              <p className="text-xs text-muted-foreground">
-                Gateway status: {health?.status ?? "unknown"} · SSE clients:{" "}
-                {health?.sseClients ?? 0}
-              </p>
+              {viewer?.role === "ADMIN" ? (
+                <p className="text-xs text-muted-foreground">
+                  Gateway status: {health?.status ?? "unknown"} · SSE clients:{" "}
+                  {health?.sseClients ?? 0}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Đăng nhập admin để xem system monitor và dữ liệu vận hành liên service.
+                </p>
+              )}
             </CardContent>
           </Card>
 

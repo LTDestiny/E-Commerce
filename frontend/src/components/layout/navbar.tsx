@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/lib/constants";
-import { authApi, clearAuthSession, getStoredUser } from "@/lib/api";
+import { authApi, clearAuthSession, getStoredUser, syncClientAuthState } from "@/lib/api";
 import { CART_UPDATED_EVENT, getCartCount, readCart } from "@/lib/cart";
 
 const iconMap = {
@@ -44,12 +44,12 @@ export function Navbar() {
   const [mounted, setMounted] = useState(false);
 
   const dynamicNavItems = mounted && user?.role === "ADMIN"
-    ? [...NAV_ITEMS, { label: "Quản trị", href: "/admin/orders", icon: "PackageSearch" as const }]
+    ? [...NAV_ITEMS, { label: "Quản trị", href: "/admin", icon: "PackageSearch" as const }]
     : NAV_ITEMS;
 
   useEffect(() => {
     const syncSession = () => {
-      setUser(getStoredUser());
+      setUser(syncClientAuthState() ?? getStoredUser());
       setCartCount(getCartCount(readCart()));
     };
 

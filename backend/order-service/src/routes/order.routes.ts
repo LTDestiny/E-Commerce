@@ -8,6 +8,7 @@ import {
   EVENT_CHANNELS,
   IEventBus,
   IEventStore,
+  OrderStatus,
   createEvent,
   OrderPlacedEvent,
   createIdempotencyMiddleware,
@@ -112,6 +113,27 @@ export function createOrderRoutes(
       const user = (req as AuthenticatedRequest).user!;
       const orders = await orderRepository.findByCustomerId(user.id);
       res.json(orders);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/orders/:id/status - Admin status update for backoffice operations
+  router.patch("/:id/status", protectRoute, hasRole("ADMIN"), async (req: Request, res: Response) => {
+    try {
+      const requestedStatus = String(req.body?.status || "").toUpperCase();
+      if (!Object.values(OrderStatus).includes(requestedStatus as OrderStatus)) {
+        res.status(400).json({ error: "Invalid order status" });
+        return;
+      }
+
+      const order = await orderRepository.updateStatus(req.params.id, requestedStatus as OrderStatus);
+      if (!order) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+
+      res.json(order);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
