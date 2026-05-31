@@ -16,7 +16,7 @@ model Shipment {
   orderId           String
   carrier           String
   trackingNumber    String?
-  status            String    @default("SCHEDULED")
+  status            String    @default("PENDING")
   estimatedDelivery DateTime?
   actualDelivery    DateTime?
   shippingAddress   Json      // ShippingAddress

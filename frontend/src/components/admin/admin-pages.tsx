@@ -1,24 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bell,
   Box,
-  Calendar,
   Check,
   CheckCircle2,
   ClipboardEdit,
   CreditCard,
-  Download,
   Mail,
   Package,
-  Plus,
   RefreshCw,
   ShieldCheck,
   Truck,
-  Users,
   XCircle,
 } from "lucide-react";
 import {
@@ -36,9 +32,17 @@ import {
   type Order,
   type Payment,
   type Shipment,
+  type ShippingAddress,
   type StoredEvent,
 } from "@/lib/api";
+import { getStatusHistory } from "@/lib/admin/status/status-history";
 import { cn } from "@/lib/utils";
+import {
+  StatusBadge,
+  StatusHistoryTimeline,
+  StatusPolicyHint,
+  StatusTransitionMenu,
+} from "@/components/admin/status-controls";
 
 type AdminData = {
   orders: Order[];
@@ -72,7 +76,7 @@ function useAdminData(): LoadState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     const [orders, inventory, payments, shipments, notifications, users, health] =
@@ -102,11 +106,11 @@ function useAdminData(): LoadState {
 
     setData(nextData);
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    void reload();
-  }, []);
+    queueMicrotask(() => void reload());
+  }, [reload]);
 
   return { data, loading, error, reload };
 }
@@ -136,34 +140,58 @@ function dateTime(value?: string) {
   }).format(new Date(value));
 }
 
-function statusTone(status: string) {
-  const normalized = status.toUpperCase();
-  if (["COMPLETED", "DELIVERED", "SENT", "PAID", "CONFIRMED", "PAYMENT_COMPLETED"].includes(normalized)) {
-    return "bg-emerald-100 text-emerald-800";
-  }
-  if (["FAILED", "CANCELLED", "REFUNDED", "EXPIRED"].includes(normalized)) {
-    return "bg-red-100 text-red-700";
-  }
-  if (["PENDING", "PENDING_PAYMENT", "PAYMENT_PROCESSING", "SCHEDULED"].includes(normalized)) {
-    return "bg-amber-100 text-amber-800";
-  }
-  return "bg-blue-100 text-blue-700";
-}
-
 function orderLabel(order: Order) {
   return order.orderCode || `#TS-${order.id.slice(0, 6).toUpperCase()}`;
 }
 
 function getCustomerName(order: Order, users: AdminUserRecord[]) {
-  return users.find((user) => user.id === order.customerId)?.name || order.shippingAddress?.fullName || "Customer";
+  return users.find((user) => user.id === order.customerId)?.name || getOrderAddress(order).fullName || "Customer";
 }
 
 function getCustomerEmail(order: Order, users: AdminUserRecord[]) {
   return users.find((user) => user.id === order.customerId)?.email || `${order.customerId.slice(0, 8)}@customer.local`;
 }
 
+function getOrderItems(order: Order): Order["items"] {
+  return Array.isArray(order.items) ? order.items : [];
+}
+
+function getOrderAddress(order: Order): ShippingAddress {
+  return order.shippingAddress || {
+    fullName: "Customer",
+    phone: "N/A",
+    street: "Address pending",
+    city: "N/A",
+    state: "",
+    zipCode: "",
+    country: "N/A",
+  };
+}
+
 function getAvailable(item: InventoryItem) {
   return item.availableStock ?? item.totalStock - item.reservedStock;
+}
+
+function getOrderById(orders: Order[], orderId: string) {
+  return orders.find((order) => order.id === orderId);
+}
+
+function isOrderFlowConsistent(order: Order, payment?: Payment, shipment?: Shipment) {
+  const paymentStatus = payment?.status?.toUpperCase();
+  const shipmentStatus = shipment?.status?.toUpperCase();
+
+  const expected: Record<string, { payments: string[]; shipments: string[] }> = {
+    PENDING: { payments: ["PENDING"], shipments: ["PENDING"] },
+    CONFIRMED: { payments: ["COMPLETED"], shipments: ["PENDING", "READY"] },
+    PROCESSING: { payments: ["COMPLETED"], shipments: ["READY", "IN_TRANSIT", "DELAYED"] },
+    COMPLETED: { payments: ["COMPLETED"], shipments: ["DELIVERED"] },
+    FAILED: { payments: ["FAILED"], shipments: ["FAILED", "CANCELLED"] },
+    CANCELLED: { payments: ["CANCELLED", "REFUNDED"], shipments: ["CANCELLED"] },
+  };
+
+  const rule = expected[order.status.toUpperCase()];
+  if (!rule) return false;
+  return rule.payments.includes(paymentStatus || "") && rule.shipments.includes(shipmentStatus || "");
 }
 
 function productStatus(item: InventoryItem) {
@@ -275,37 +303,26 @@ function MiniBars({ values }: { values: number[] }) {
 
 export function AdminDashboardPage() {
   const { data, loading, error } = useAdminData();
-  const revenue = data.orders.reduce((sum, order) => sum + order.totalAmount, 0);
+  const revenue = data.payments
+    .filter((payment) => payment.status.toUpperCase() === "COMPLETED")
+    .reduce((sum, payment) => sum + payment.amount, 0);
   const failedPayments = data.payments.filter((payment) => payment.status.toUpperCase() === "FAILED").length;
-  const pendingShipments = data.shipments.filter((shipment) => shipment.status.toUpperCase() !== "DELIVERED").length;
+  const delayedShipments = data.shipments.filter((shipment) => shipment.status.toUpperCase() === "DELAYED").length;
   const lowStock = data.inventory.filter((item) => getAvailable(item) <= item.lowStockThreshold);
-  const completedOrders = data.orders.filter((order) =>
-    ["DELIVERED", "COMPLETED", "CONFIRMED", "PAYMENT_COMPLETED"].includes(order.status.toUpperCase()),
-  ).length;
-  const processingOrders = data.orders.filter((order) =>
-    !["DELIVERED", "COMPLETED", "CONFIRMED", "PAYMENT_COMPLETED", "CANCELLED"].includes(order.status.toUpperCase()),
-  ).length;
+  const completedOrders = data.orders.filter((order) => order.status.toUpperCase() === "COMPLETED").length;
+  const processingOrders = data.orders.filter((order) => order.status.toUpperCase() === "PROCESSING").length;
+  const pendingOrders = data.orders.filter((order) => order.status.toUpperCase() === "PENDING").length;
 
   return (
     <AdminPageFrame
       title="Operations Dashboard"
       subtitle="Real-time performance metrics and system health monitoring."
-      actions={
-        <>
-          <button className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-[#e8e5ef] px-4 py-2 text-sm font-semibold">
-            <Calendar className="h-4 w-4" /> Last 30 Days
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-bold text-white">
-            <Download className="h-4 w-4" /> Export Report
-          </button>
-        </>
-      }
     >
       <LoadingBlock loading={loading} error={error} />
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
         <StatCard icon={<CreditCard className="h-6 w-6" />} label="Total Revenue" value={compactMoney(revenue)} note="+12%" />
         <StatCard icon={<ShoppingIcon />} label="Total Orders" value={String(data.orders.length)} note="+5%" />
-        <StatCard icon={<Truck className="h-6 w-6" />} label="Pending Shipments" value={String(pendingShipments)} tone="neutral" />
+        <StatCard icon={<Truck className="h-6 w-6" />} label="Delayed Shipments" value={String(delayedShipments)} tone="amber" />
         <StatCard icon={<AlertTriangle className="h-6 w-6" />} label="Failed Payments" value={String(failedPayments)} tone="red" />
         <StatCard icon={<ClipboardEdit className="h-6 w-6" />} label="Low Stock Items" value={String(lowStock.length)} tone="neutral" />
       </div>
@@ -335,7 +352,7 @@ export function AdminDashboardPage() {
           <div className="mt-8 space-y-4 text-sm">
             <MetricRow label="Completed" value={`${Math.round((completedOrders / Math.max(1, data.orders.length)) * 100)}%`} dot="bg-blue-700" />
             <MetricRow label="Processing" value={`${Math.round((processingOrders / Math.max(1, data.orders.length)) * 100)}%`} dot="bg-emerald-500" />
-            <MetricRow label="Cancelled" value={`${Math.round(((data.orders.length - completedOrders - processingOrders) / Math.max(1, data.orders.length)) * 100)}%`} dot="bg-red-600" />
+            <MetricRow label="Pending" value={`${Math.round((pendingOrders / Math.max(1, data.orders.length)) * 100)}%`} dot="bg-amber-500" />
           </div>
         </section>
       </div>
@@ -386,36 +403,146 @@ function MetricRow({ label, value, dot }: { label: string; value: string; dot: s
   );
 }
 
+function AdminSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ label: string; value: string }>;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const current = options.find((option) => option.value === value)?.label || value;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent | TouchEvent) => {
+      if (ref.current?.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-700">{label}</span>
+      <button
+        type="button"
+        onClick={() => setOpen((state) => !state)}
+        className="mt-2 flex h-11 w-full items-center justify-between rounded-md border border-zinc-300 bg-[#f3f1fa] px-4 text-left text-sm"
+      >
+        {current}
+        <span className="text-zinc-500">v</span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 right-0 top-[72px] z-40 rounded-lg border border-zinc-300 bg-white p-1 shadow-2xl">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className={cn("block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[#f3f1fa]", value === option.value ? "font-black text-blue-700" : "")}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminOrdersPage() {
-  const { data, loading, error } = useAdminData();
+  const { data, loading, error, reload } = useAdminData();
+  const [tab, setTab] = useState<"all" | "pending" | "flagged">("all");
+  const [status, setStatus] = useState("all");
+  const [paymentMethod, setPaymentMethod] = useState("all");
+  const [sortBy, setSortBy] = useState("createdAt-desc");
+
+  const filteredOrders = useMemo(() => {
+    let rows = [...data.orders];
+    if (tab === "pending") rows = rows.filter((order) => order.status.includes("PENDING"));
+    if (tab === "flagged") rows = rows.filter((order) => ["FAILED", "CANCELLED"].includes(order.status));
+    if (status !== "all") rows = rows.filter((order) => order.status === status);
+    if (paymentMethod !== "all") rows = rows.filter((order) => (order.paymentMethod || "SEPAY_QR") === paymentMethod);
+    rows.sort((a, b) => {
+      if (sortBy === "totalAmount-desc") return b.totalAmount - a.totalAmount;
+      if (sortBy === "totalAmount-asc") return a.totalAmount - b.totalAmount;
+      if (sortBy === "status-asc") return a.status.localeCompare(b.status);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+    return rows;
+  }, [data.orders, paymentMethod, sortBy, status, tab]);
+
+  const pendingCount = data.orders.filter((order) => order.status.includes("PENDING")).length;
+  const flaggedCount = data.orders.filter((order) => ["FAILED", "CANCELLED"].includes(order.status)).length;
+  const statusOptions = [
+    { label: "All Statuses", value: "all" },
+    ...Array.from(new Set(data.orders.map((order) => order.status))).map((value) => ({ label: value, value })),
+  ];
+  const paymentOptions = [
+    { label: "Any Method", value: "all" },
+    ...Array.from(new Set(data.orders.map((order) => order.paymentMethod || "SEPAY_QR"))).map((value) => ({ label: value, value })),
+  ];
+  const resetFilters = () => {
+    setTab("all");
+    setStatus("all");
+    setPaymentMethod("all");
+    setSortBy("createdAt-desc");
+  };
+
   return (
     <AdminPageFrame
       title="Order Management"
-      subtitle={`Reviewing ${data.orders.length} total platform orders`}
-      actions={
-        <>
-          <button className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold"><Download className="h-4 w-4" /> Export CSV</button>
-          <button className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold"><Package className="h-4 w-4" /> Print Labels</button>
-          <button className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-bold text-white"><Plus className="h-4 w-4" /> Create Order</button>
-        </>
-      }
+      subtitle={`Reviewing ${filteredOrders.length} of ${data.orders.length} total platform orders`}
     >
       <LoadingBlock loading={loading} error={error} />
       <section className="rounded-xl border border-zinc-300 bg-white">
         <div className="flex gap-8 border-b border-zinc-300 px-6">
-          {["All Orders", "Pending", "Flagged"].map((tab, index) => (
-            <button key={tab} className={cn("border-b-2 px-2 py-5 text-sm font-semibold", index === 0 ? "border-blue-700 text-blue-700" : "border-transparent")}>
-              {tab}{tab === "Flagged" ? <span className="ml-2 rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">12</span> : null}
+          {[
+            { id: "all", label: "All Orders", count: data.orders.length },
+            { id: "pending", label: "Pending", count: pendingCount },
+            { id: "flagged", label: "Flagged", count: flaggedCount },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id as typeof tab)}
+              className={cn("border-b-2 px-2 py-5 text-sm font-semibold", tab === item.id ? "border-blue-700 text-blue-700" : "border-transparent")}
+            >
+              {item.label}
+              {item.id !== "all" ? <span className="ml-2 rounded-full bg-red-100 px-2 py-1 text-xs text-red-700">{item.count}</span> : null}
             </button>
           ))}
         </div>
-        <div className="grid gap-4 border-b border-zinc-300 p-5 md:grid-cols-4">
-          <FilterBox label="Status" value="All Statuses" />
-          <FilterBox label="Date Range" value="Jan 1 - Jan 31, 2026" />
-          <FilterBox label="Payment Method" value="Any Method" />
-          <button className="mt-5 rounded-md bg-[#e7e4ef] px-4 py-3 text-sm font-semibold md:mt-6">Reset Filters</button>
+        <div className="grid min-h-[96px] gap-4 border-b border-zinc-300 p-5 md:grid-cols-4">
+          <AdminSelect label="Status" value={status} options={statusOptions} onChange={setStatus} />
+          <AdminSelect label="Payment Method" value={paymentMethod} options={paymentOptions} onChange={setPaymentMethod} />
+          <AdminSelect
+            label="Sort"
+            value={sortBy}
+            options={[
+              { label: "Created newest", value: "createdAt-desc" },
+              { label: "Total high to low", value: "totalAmount-desc" },
+              { label: "Total low to high", value: "totalAmount-asc" },
+              { label: "Status A-Z", value: "status-asc" },
+            ]}
+            onChange={setSortBy}
+          />
+          <button onClick={resetFilters} className="mt-5 h-11 rounded-md bg-[#e7e4ef] px-4 text-sm font-semibold md:mt-6">Reset Filters</button>
         </div>
-        <OrdersTable orders={data.orders} users={data.users} />
+        <OrdersTable orders={filteredOrders} users={data.users} onChanged={reload} />
       </section>
       <div className="grid gap-6 md:grid-cols-3">
         <StatCard icon={<CheckCircle2 className="h-6 w-6" />} label="Revenue Growth" value="+24.8%" tone="blue" />
@@ -426,16 +553,7 @@ export function AdminOrdersPage() {
   );
 }
 
-function FilterBox({ label, value }: { label: string; value: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-700">{label}</span>
-      <span className="mt-2 block rounded-md border border-zinc-300 bg-[#f3f1fa] px-4 py-3 text-sm">{value}</span>
-    </label>
-  );
-}
-
-function OrdersTable({ orders, users }: { orders: Order[]; users: AdminUserRecord[] }) {
+function OrdersTable({ orders, users, onChanged }: { orders: Order[]; users: AdminUserRecord[]; onChanged?: () => Promise<void> }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[900px] text-left text-sm">
@@ -447,6 +565,7 @@ function OrdersTable({ orders, users }: { orders: Order[]; users: AdminUserRecor
             <th className="px-6 py-4">Total</th>
             <th className="px-6 py-4">Payment</th>
             <th className="px-6 py-4">Status</th>
+            <th className="px-6 py-4">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-300">
@@ -459,10 +578,19 @@ function OrdersTable({ orders, users }: { orders: Order[]; users: AdminUserRecor
                 <div className="font-bold">{getCustomerName(order, users)}</div>
                 <div className="text-xs text-zinc-500">{getCustomerEmail(order, users)}</div>
               </td>
-              <td className="px-6 py-5">{order.items.reduce((sum, item) => sum + item.quantity, 0)} Units</td>
+              <td className="px-6 py-5">{getOrderItems(order).reduce((sum, item) => sum + item.quantity, 0)} Units</td>
               <td className="px-6 py-5 font-black">{money(order.totalAmount)}</td>
               <td className="px-6 py-5">{order.paymentMethod || "SEPAY_QR"}</td>
-              <td className="px-6 py-5"><Badge className={statusTone(order.status)}>{order.status}</Badge></td>
+              <td className="px-6 py-5"><StatusBadge entityType="order" status={order.status} /></td>
+              <td className="px-6 py-5">
+                <StatusTransitionMenu
+                  entityType="order"
+                  entityId={order.id}
+                  entityLabel={orderLabel(order)}
+                  status={order.status}
+                  onChanged={onChanged}
+                />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -478,10 +606,12 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const [orderResult, paymentResult, shipmentResult, notificationResult, eventResult] =
       await Promise.allSettled([
         ordersApi.get(orderId),
@@ -491,16 +621,17 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
         ordersApi.getEvents(orderId),
       ]);
     setOrder(orderResult.status === "fulfilled" ? orderResult.value : null);
+    setLoadError(orderResult.status === "rejected" ? orderResult.reason?.message || "Khong tai duoc don hang." : null);
     setPayment(paymentResult.status === "fulfilled" ? paymentResult.value : null);
     setShipment(shipmentResult.status === "fulfilled" ? shipmentResult.value : null);
     setNotifications(notificationResult.status === "fulfilled" ? notificationResult.value : []);
     setEvents(eventResult.status === "fulfilled" ? eventResult.value : []);
     setLoading(false);
-  };
+  }, [orderId]);
 
   useEffect(() => {
-    void load();
-  }, [orderId]);
+    queueMicrotask(() => void load());
+  }, [load]);
 
   const resendEmail = async () => {
     const notification = notifications[0];
@@ -514,11 +645,12 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
   };
 
   if (loading) return <LoadingBlock loading error={null} />;
-  if (!order) return <LoadingBlock loading={false} error="Khong tim thay don hang." />;
+  if (!order) return <LoadingBlock loading={false} error={loadError || "Khong tim thay don hang."} />;
 
-  const subtotal = order.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const orderItems = getOrderItems(order);
+  const subtotal = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const shippingFee = Math.max(0, order.totalAmount - subtotal);
-  const customer = order.shippingAddress;
+  const customer = getOrderAddress(order);
 
   return (
     <AdminPageFrame
@@ -526,6 +658,14 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
       subtitle={`Placed on ${dateTime(order.createdAt)} via ${order.paymentMethod || "SEPAY_QR"}`}
       actions={
         <>
+          <StatusBadge entityType="order" status={order.status} className="self-center" />
+          <StatusTransitionMenu
+            entityType="order"
+            entityId={order.id}
+            entityLabel={orderLabel(order)}
+            status={order.status}
+            onChanged={load}
+          />
           <button className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-4 py-2 font-semibold"><ClipboardEdit className="h-4 w-4" /> Edit Address</button>
           <button onClick={resendEmail} className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-4 py-2 font-semibold"><Mail className="h-4 w-4" /> Resend Email</button>
           <button className="inline-flex items-center gap-2 rounded-md bg-red-100 px-4 py-2 font-semibold text-red-700"><RefreshCw className="h-4 w-4" /> Refund Order</button>
@@ -538,10 +678,10 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
           <section className="rounded-xl border border-zinc-300 bg-white">
             <div className="flex items-center justify-between border-b border-zinc-300 px-7 py-5">
               <h2 className="text-xl font-black">Order Items</h2>
-              <span className="rounded bg-[#f0edf8] px-3 py-2 font-semibold">{order.items.length} Items Total</span>
+              <span className="rounded bg-[#f0edf8] px-3 py-2 font-semibold">{orderItems.length} Items Total</span>
             </div>
             <div className="divide-y divide-zinc-300">
-              {order.items.map((item) => (
+              {orderItems.map((item) => (
                 <div key={`${item.productId}-${item.productName}`} className="grid gap-5 px-7 py-6 sm:grid-cols-[110px_1fr_auto] sm:items-center">
                   <div className="flex h-24 w-24 items-center justify-center rounded border border-zinc-300 bg-slate-900 text-cyan-200">
                     <Box className="h-10 w-10" />
@@ -567,8 +707,9 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
 
           <section className="rounded-xl border border-zinc-300 bg-white p-7">
             <h2 className="text-xl font-black">Order Journey</h2>
+            <StatusPolicyHint entityType="order" status={order.status} />
             <div className="mt-10 grid gap-4 md:grid-cols-5">
-              {["PENDING", "PAYMENT_COMPLETED", "CONFIRMED", "SHIPPED", "DELIVERED"].map((step) => (
+              {["PENDING", "CONFIRMED", "PROCESSING", "COMPLETED"].map((step) => (
                 <div key={step} className="text-center">
                   <div className={cn("mx-auto flex h-10 w-10 items-center justify-center rounded-xl text-white", order.status === step || step === "PENDING" ? "bg-blue-700" : "bg-blue-200")}>
                     <Check className="h-5 w-5" />
@@ -578,6 +719,8 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
               ))}
             </div>
           </section>
+
+          <StatusHistoryTimeline entityType="order" entityId={order.id} />
 
           <section className="rounded-xl border border-zinc-300 bg-white p-7">
             <h2 className="text-xl font-black">Internal Administration Notes</h2>
@@ -625,7 +768,10 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
               </div>
             </div>
             <div className="p-7">
-              <h2 className="text-xl font-black">Shipping Address</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xl font-black">Shipping Address</h2>
+                {shipment ? <StatusBadge entityType="shipment" status={shipment.status} /> : null}
+              </div>
               <p className="mt-4 leading-7">
                 {customer.street}<br />
                 {customer.city}, {customer.state} {customer.zipCode}<br />
@@ -641,12 +787,13 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
           <section className="rounded-xl border border-zinc-300 bg-white p-7">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-black">Payment Details</h2>
-              <ShieldCheck className="h-6 w-6 text-emerald-600" />
+              {payment ? <StatusBadge entityType="payment" status={payment.status} /> : <ShieldCheck className="h-6 w-6 text-emerald-600" />}
             </div>
             <div className="mt-4 flex items-center gap-2"><CreditCard className="h-4 w-4" /> {payment?.provider || payment?.method || "Payment pending"}</div>
             <div className="mt-5 rounded-lg bg-[#f2effa] p-5 text-sm">
               <AmountRow label="Transaction ID" value={payment?.transactionId || "N/A"} />
               <AmountRow label="Method" value={payment?.method || "N/A"} />
+              <AmountRow label="Payment Status" value={payment?.status || "N/A"} />
               <AmountRow label="Captured At" value={dateTime(payment?.paidAt || payment?.createdAt)} />
             </div>
           </section>
@@ -674,7 +821,6 @@ export function AdminInventoryPage() {
     <AdminPageFrame
       title="Inventory Management"
       subtitle="Track, monitor, and manage product stock levels across all regions."
-      actions={<button className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-4 py-2 font-bold text-white"><Plus className="h-4 w-4" /> Add Product</button>}
     >
       <LoadingBlock loading={loading} error={error} />
       <div className="grid gap-6 md:grid-cols-3">
@@ -685,10 +831,7 @@ export function AdminInventoryPage() {
       <section className="rounded-xl border border-zinc-300 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-300 px-7 py-5">
           <h2 className="text-xl font-black">Product Inventory</h2>
-          <div className="flex gap-3">
-            <Download className="h-5 w-5" />
-            <RefreshCw className="h-5 w-5" />
-          </div>
+          <div className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">Computed stock state</div>
         </div>
         <InventoryTable items={data.inventory} />
       </section>
@@ -744,7 +887,12 @@ function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: 
                 <td className="px-6 py-5">{item.reservedStock}</td>
                 <td className={cn("px-6 py-5 font-black", getAvailable(item) <= item.lowStockThreshold ? "text-red-700" : "")}>{getAvailable(item)}</td>
                 <td className="px-6 py-5">{item.lowStockThreshold}</td>
-                <td className="px-6 py-5"><span className={cn("rounded-xl px-3 py-2 text-xs font-semibold", status.tone)}>{status.label}</span></td>
+                <td className="px-6 py-5">
+                  <StatusBadge
+                    entityType="inventory"
+                    status={status.label === "Out of Stock" ? "OUT_OF_STOCK" : status.label === "Low Stock" ? "LOW_STOCK" : "ACTIVE"}
+                  />
+                </td>
               </tr>
             );
           })}
@@ -755,15 +903,14 @@ function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: 
 }
 
 export function AdminPaymentsPage() {
-  const { data, loading, error } = useAdminData();
-  const completed = data.payments.filter((payment) => ["COMPLETED", "SUCCESS", "PAID"].includes(payment.status.toUpperCase())).length;
+  const { data, loading, error, reload } = useAdminData();
+  const completed = data.payments.filter((payment) => payment.status.toUpperCase() === "COMPLETED").length;
   const failed = data.payments.filter((payment) => payment.status.toUpperCase() === "FAILED").length;
   const volume = data.payments.reduce((sum, payment) => sum + payment.amount, 0);
   return (
     <AdminPageFrame
       title="Payments Management"
       subtitle="Monitor transaction flows, reconciliation status, and system success rates."
-      actions={<button className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-3 font-bold text-white"><Download className="h-4 w-4" /> Export Reconciliation Report</button>}
     >
       <LoadingBlock loading={loading} error={error} />
       <div className="grid gap-6 md:grid-cols-3">
@@ -772,8 +919,7 @@ export function AdminPaymentsPage() {
         <StatCard icon={<AlertTriangle className="h-6 w-6" />} label="Failed Payments" value={String(failed)} tone="red" />
       </div>
       <section className="rounded-xl border border-zinc-300 bg-white">
-        <div className="border-b border-zinc-300 bg-[#f0edf8] px-6 py-4 font-semibold">Filters: All Statuses · Current period</div>
-        <PaymentsTable payments={data.payments} />
+        <PaymentsTable payments={data.payments} orders={data.orders} onChanged={reload} />
       </section>
       <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
         <section className="rounded-xl border border-zinc-300 bg-white p-7">
@@ -797,33 +943,60 @@ export function AdminPaymentsPage() {
   );
 }
 
-function PaymentsTable({ payments }: { payments: Payment[] }) {
+function PaymentsTable({
+  payments,
+  orders,
+  onChanged,
+}: {
+  payments: Payment[];
+  orders: Order[];
+  onChanged?: () => Promise<void>;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[900px] text-left text-sm">
+      <table className="w-full min-w-[1040px] text-left text-sm">
         <thead className="bg-[#f0edf8] text-xs font-black uppercase tracking-[0.12em]">
           <tr>
             <th className="px-6 py-4">Payment ID</th>
             <th className="px-6 py-4">Order ID</th>
+            <th className="px-6 py-4">Order Status</th>
             <th className="px-6 py-4">Amount</th>
             <th className="px-6 py-4">Method</th>
-            <th className="px-6 py-4">Status</th>
+            <th className="px-6 py-4">Payment Status</th>
             <th className="px-6 py-4">Transaction ID</th>
             <th className="px-6 py-4">Created At</th>
+            <th className="px-6 py-4">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-300">
-          {payments.slice(0, 10).map((payment) => (
-            <tr key={payment.id}>
-              <td className="px-6 py-5 font-black text-blue-700">{payment.id.slice(0, 12)}</td>
-              <td className="px-6 py-5">{payment.orderId.slice(0, 12)}</td>
-              <td className="px-6 py-5 font-black">{money(payment.amount)}</td>
-              <td className="px-6 py-5">{payment.method}</td>
-              <td className="px-6 py-5"><Badge className={statusTone(payment.status)}>{payment.status}</Badge></td>
-              <td className="px-6 py-5 text-zinc-600">{payment.transactionId || "-"}</td>
-              <td className="px-6 py-5">{dateTime(payment.createdAt)}</td>
-            </tr>
-          ))}
+          {payments.map((payment) => {
+            const order = getOrderById(orders, payment.orderId);
+            return (
+              <tr key={payment.id}>
+                <td className="px-6 py-5 font-black text-blue-700">{payment.id.slice(0, 12)}</td>
+                <td className="px-6 py-5">
+                  <Link href={`/admin/orders/${payment.orderId}`} className="font-bold text-blue-700">
+                    {order ? orderLabel(order) : payment.orderId.slice(0, 12)}
+                  </Link>
+                </td>
+                <td className="px-6 py-5">{order ? <StatusBadge entityType="order" status={order.status} /> : "-"}</td>
+                <td className="px-6 py-5 font-black">{money(payment.amount)}</td>
+                <td className="px-6 py-5">{payment.method}</td>
+                <td className="px-6 py-5"><StatusBadge entityType="payment" status={payment.status} /></td>
+                <td className="px-6 py-5 text-zinc-600">{payment.transactionId || "-"}</td>
+                <td className="px-6 py-5">{dateTime(payment.createdAt)}</td>
+                <td className="px-6 py-5">
+                  <StatusTransitionMenu
+                    entityType="payment"
+                    entityId={payment.id}
+                    entityLabel={payment.id}
+                    status={payment.status}
+                    onChanged={onChanged}
+                  />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -831,7 +1004,7 @@ function PaymentsTable({ payments }: { payments: Payment[] }) {
 }
 
 export function AdminShipmentsPage() {
-  const { data, loading, error } = useAdminData();
+  const { data, loading, error, reload } = useAdminData();
   const delivered = data.shipments.filter((shipment) => shipment.status.toUpperCase() === "DELIVERED").length;
   return (
     <AdminPageFrame title="Shipments" subtitle="Track carriers, labels, and delivery progress.">
@@ -842,37 +1015,64 @@ export function AdminShipmentsPage() {
         <StatCard icon={<Package className="h-6 w-6" />} label="In Transit" value={String(data.shipments.length - delivered)} tone="blue" />
       </div>
       <section className="rounded-xl border border-zinc-300 bg-white">
-        <ShipmentsTable shipments={data.shipments} />
+        <ShipmentsTable shipments={data.shipments} orders={data.orders} onChanged={reload} />
       </section>
     </AdminPageFrame>
   );
 }
 
-function ShipmentsTable({ shipments }: { shipments: Shipment[] }) {
+function ShipmentsTable({
+  shipments,
+  orders,
+  onChanged,
+}: {
+  shipments: Shipment[];
+  orders: Order[];
+  onChanged?: () => Promise<void>;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="w-full min-w-[960px] text-left text-sm">
         <thead className="bg-[#f0edf8] text-xs font-black uppercase tracking-[0.12em]">
           <tr>
             <th className="px-6 py-4">Shipment ID</th>
             <th className="px-6 py-4">Order</th>
+            <th className="px-6 py-4">Order Status</th>
             <th className="px-6 py-4">Carrier</th>
             <th className="px-6 py-4">Tracking</th>
-            <th className="px-6 py-4">Status</th>
+            <th className="px-6 py-4">Shipment Status</th>
             <th className="px-6 py-4">ETA</th>
+            <th className="px-6 py-4">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-300">
-          {shipments.map((shipment) => (
-            <tr key={shipment.id}>
-              <td className="px-6 py-5 font-black text-blue-700">{shipment.id.slice(0, 12)}</td>
-              <td className="px-6 py-5">{shipment.orderId.slice(0, 12)}</td>
-              <td className="px-6 py-5">{shipment.carrier}</td>
-              <td className="px-6 py-5">{shipment.trackingNumber || "-"}</td>
-              <td className="px-6 py-5"><Badge className={statusTone(shipment.status)}>{shipment.status}</Badge></td>
-              <td className="px-6 py-5">{dateTime(shipment.estimatedDelivery)}</td>
-            </tr>
-          ))}
+          {shipments.map((shipment) => {
+            const order = getOrderById(orders, shipment.orderId);
+            return (
+              <tr key={shipment.id}>
+                <td className="px-6 py-5 font-black text-blue-700">{shipment.id.slice(0, 12)}</td>
+                <td className="px-6 py-5">
+                  <Link href={`/admin/orders/${shipment.orderId}`} className="font-bold text-blue-700">
+                    {order ? orderLabel(order) : shipment.orderId.slice(0, 12)}
+                  </Link>
+                </td>
+                <td className="px-6 py-5">{order ? <StatusBadge entityType="order" status={order.status} /> : "-"}</td>
+                <td className="px-6 py-5">{shipment.carrier}</td>
+                <td className="px-6 py-5">{shipment.trackingNumber || "-"}</td>
+                <td className="px-6 py-5"><StatusBadge entityType="shipment" status={shipment.status} /></td>
+                <td className="px-6 py-5">{dateTime(shipment.estimatedDelivery)}</td>
+                <td className="px-6 py-5">
+                  <StatusTransitionMenu
+                    entityType="shipment"
+                    entityId={shipment.id}
+                    entityLabel={shipment.id}
+                    status={shipment.status}
+                    onChanged={onChanged}
+                  />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -907,9 +1107,20 @@ export function AdminNotificationsPage() {
                   <td className="px-6 py-5 font-black">{item.subject}</td>
                   <td className="px-6 py-5">{item.type}</td>
                   <td className="px-6 py-5">{item.orderId.slice(0, 12)}</td>
-                  <td className="px-6 py-5"><Badge className={statusTone(item.status)}>{item.status}</Badge></td>
+                  <td className="px-6 py-5"><StatusBadge entityType="notification" status={item.status} /></td>
                   <td className="px-6 py-5">{dateTime(item.sentAt || item.createdAt)}</td>
-                  <td className="px-6 py-5"><button onClick={() => resend(item.id)} className="font-bold text-blue-700">Resend</button></td>
+                  <td className="px-6 py-5">
+                    <div className="flex gap-2">
+                      <button onClick={() => resend(item.id)} className="font-bold text-blue-700">Resend</button>
+                      <StatusTransitionMenu
+                        entityType="notification"
+                        entityId={item.id}
+                        entityLabel={item.subject}
+                        status={item.status}
+                        onChanged={reload}
+                      />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -921,7 +1132,7 @@ export function AdminNotificationsPage() {
 }
 
 export function AdminCustomersPage() {
-  const { data, loading, error } = useAdminData();
+  const { data, loading, error, reload } = useAdminData();
   return (
     <AdminPageFrame title="Customers" subtitle="Manage customers and admin accounts from the auth service.">
       <LoadingBlock loading={loading} error={error} />
@@ -933,9 +1144,11 @@ export function AdminCustomersPage() {
                 <th className="px-6 py-4">Name</th>
                 <th className="px-6 py-4">Email</th>
                 <th className="px-6 py-4">Role</th>
+                <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Orders</th>
                 <th className="px-6 py-4">Lifetime Spend</th>
                 <th className="px-6 py-4">Created</th>
+                <th className="px-6 py-4">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-300">
@@ -947,9 +1160,25 @@ export function AdminCustomersPage() {
                     <td className="px-6 py-5 font-black">{user.name}</td>
                     <td className="px-6 py-5">{user.email}</td>
                     <td className="px-6 py-5"><Badge className={user.role === "ADMIN" ? "bg-blue-100 text-blue-700" : "bg-zinc-100 text-zinc-700"}>{user.role}</Badge></td>
+                    <td className="px-6 py-5"><StatusBadge entityType="user" status={user.status || "ACTIVE"} /></td>
                     <td className="px-6 py-5">{orders.length}</td>
                     <td className="px-6 py-5 font-black">{money(spend)}</td>
                     <td className="px-6 py-5">{dateTime(user.createdAt)}</td>
+                    <td className="px-6 py-5">
+                      {user.role === "ADMIN" ? (
+                        <span title="Admin account protection" className="text-xs font-semibold text-zinc-500">
+                          Protected
+                        </span>
+                      ) : (
+                        <StatusTransitionMenu
+                          entityType="user"
+                          entityId={user.id}
+                          entityLabel={user.email}
+                          status={user.status || "ACTIVE"}
+                          onChanged={reload}
+                        />
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -970,17 +1199,12 @@ export function AdminSystemMonitorPage() {
       title="System Monitor"
       subtitle="Real-time health monitoring of TechSphere distributed services and infrastructure."
       actions={
-        <>
-          <button onClick={reload} className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-3 font-bold text-white"><RefreshCw className="h-4 w-4" /> Force Refresh</button>
-          <button className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-5 py-3 font-semibold"><Download className="h-4 w-4" /> Export Logs</button>
-        </>
+        <button onClick={reload} className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-3 font-bold text-white"><RefreshCw className="h-4 w-4" /> Force Refresh</button>
       }
     >
       <LoadingBlock loading={loading} error={error} />
       <div className="flex items-center gap-3">
-        <Badge className={healthy === services.length ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}>
-          {healthy === services.length ? "Systems Nominal" : "Systems Degraded"}
-        </Badge>
+        <StatusBadge entityType="system" status={healthy === services.length ? "healthy" : "degraded"} />
       </div>
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {services.map((service) => (
@@ -996,7 +1220,7 @@ export function AdminSystemMonitorPage() {
             </div>
             <div className="mt-6 flex justify-between text-sm font-semibold">
               <span>Uptime: {Math.round(service.data?.uptime || 0)}s</span>
-              <span>{service.status}</span>
+              <StatusBadge entityType="system" status={service.status} />
             </div>
             <div className="mt-4 h-1.5 rounded-full bg-[#eceaf3]">
               <div className={cn("h-full rounded-full", service.status === "healthy" ? "bg-emerald-500" : "bg-amber-500")} style={{ width: service.status === "healthy" ? "96%" : "64%" }} />
@@ -1044,7 +1268,20 @@ function Resource({ label, value }: { label: string; value: number }) {
 
 export function AdminAuditLogsPage() {
   const { data, loading, error } = useAdminData();
+  const [manualHistory, setManualHistory] = useState<ReturnType<typeof getStatusHistory>>([]);
+  useEffect(() => {
+    const load = () => setManualHistory(getStatusHistory());
+    load();
+    window.addEventListener("admin-status-history-changed", load);
+    return () => window.removeEventListener("admin-status-history-changed", load);
+  }, []);
   const rows = [
+    ...manualHistory.map((entry) => ({
+      id: entry.id,
+      source: "AdminStatusControl",
+      action: `${entry.entityType} ${entry.entityId}: ${entry.fromStatus} -> ${entry.toStatus}${entry.reason ? ` (${entry.reason})` : ""}`,
+      at: entry.timestamp,
+    })),
     ...data.orders.map((order) => ({ id: `order-${order.id}`, source: "OrderSvc", action: `${orderLabel(order)} status ${order.status}`, at: order.updatedAt })),
     ...data.payments.map((payment) => ({ id: `payment-${payment.id}`, source: "PaymentSvc", action: `${payment.method} ${payment.status}`, at: payment.updatedAt })),
     ...data.notifications.map((item) => ({ id: `notification-${item.id}`, source: "NotificationSvc", action: `${item.subject} ${item.status}`, at: item.createdAt })),
@@ -1069,27 +1306,168 @@ export function AdminAuditLogsPage() {
 }
 
 export function AdminSettingsPage() {
+  const { data, loading, error, reload } = useAdminData();
+  const [message, setMessage] = useState<string | null>(null);
+  const testOrder = data.orders.find((order) => order.id === "order-ts-9601");
+  const testPayment = data.payments.find((payment) => payment.orderId === "order-ts-9601");
+  const testShipment = data.shipments.find((shipment) => shipment.orderId === "order-ts-9601");
+  const seededOrders = data.orders.filter((order) => order.id.startsWith("order-ts-96"));
+  const pendingSeededOrders = seededOrders.filter((order) => order.status === "PENDING");
+  const consistentSeededOrders = seededOrders.filter((order) =>
+    isOrderFlowConsistent(
+      order,
+      data.payments.find((payment) => payment.orderId === order.id),
+      data.shipments.find((shipment) => shipment.orderId === order.id),
+    ),
+  );
+
+  const notify = (value: string) => {
+    setMessage(value);
+    window.setTimeout(() => setMessage(null), 3000);
+  };
+
+  const copyTestIds = async () => {
+    await navigator.clipboard.writeText(
+      [
+        "Admin seeded test data",
+        "Pending orders: TS-9601 -> TS-9620",
+        "Confirmed orders: TS-9621 -> TS-9630",
+        "Processing orders: TS-9631 -> TS-9640",
+        "Completed orders: TS-9641 -> TS-9655",
+        "Failed payment orders: TS-9656 -> TS-9660",
+        "Sample customer: Flow Customer 01",
+        "Sample order ID: order-ts-9601",
+        `Sample payment ID: ${testPayment?.id || "pay-ts-9601"}`,
+        `Sample shipment ID: ${testShipment?.id || "ship-ts-9601"}`,
+        "Search keyword: Flow Customer 01 / TS-9601 / pay-ts-9601 / ship-ts-9601",
+      ].join("\n"),
+    );
+    notify("Copied test flow IDs.");
+  };
+
+  const exportSnapshot = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      testFlow: {
+        order: testOrder,
+        payment: testPayment,
+        shipment: testShipment,
+        notifications: data.notifications.filter((item) => item.orderId === "order-ts-9601"),
+      },
+      totals: {
+        orders: data.orders.length,
+        payments: data.payments.length,
+        shipments: data.shipments.length,
+        notifications: data.notifications.length,
+        users: data.users.length,
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "techsphere-admin-snapshot.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    notify("Exported admin snapshot.");
+  };
+
+  const resetLocalState = () => {
+    window.localStorage.removeItem("techsphere_admin_read_notifications");
+    window.localStorage.removeItem("techsphere_admin_status_history");
+    window.dispatchEvent(new Event("admin-status-history-changed"));
+    notify("Cleared local notification and audit cache.");
+  };
+
   return (
     <AdminPageFrame title="Settings" subtitle="Admin workspace, security, and operational preferences.">
+      <LoadingBlock loading={loading} error={error} />
+      {message ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">
+          {message}
+        </div>
+      ) : null}
+      <section className="rounded-xl border border-blue-200 bg-blue-50 p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Seeded Test Data: TS-9601 - TS-9660</h2>
+            <p className="mt-1 text-sm text-blue-900">
+              Uses 20 pending, 10 confirmed, 10 processing, 15 completed, 5 failed payments, 5 delayed shipments, and 10 notification events.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button onClick={copyTestIds} className="rounded-md bg-blue-700 px-4 py-2 text-sm font-bold text-white">Copy Test IDs</button>
+            <Link href="/admin/orders/order-ts-9601" className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-bold text-blue-700">
+              Open Pending Order
+            </Link>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <SettingRow label="Pending orders" value={String(pendingSeededOrders.length)} />
+          <SettingRow label="Flow-state orders" value={String(Math.max(0, seededOrders.length - pendingSeededOrders.length))} />
+          <SettingRow label="Consistent flows" value={`${consistentSeededOrders.length} / ${seededOrders.length}`} />
+        </div>
+      </section>
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-300 bg-white p-7">
-          <h2 className="text-xl font-black">Security</h2>
+          <h2 className="text-xl font-black">Useful Admin Actions</h2>
           <div className="mt-5 space-y-4">
-            <SettingRow label="Require admin role" value="Enabled" />
-            <SettingRow label="JWT session sync" value="Enabled" />
-            <SettingRow label="Audit trail" value="Enabled" />
+            <SettingAction
+              title="Refresh live data"
+              description="Reload orders, payments, shipments, notifications, users, and health data from the gateway."
+              action="Refresh"
+              onClick={() => void reload().then(() => notify("Admin data refreshed."))}
+            />
+            <SettingAction
+              title="Export admin snapshot"
+              description="Download a JSON snapshot with totals and the TS-9601 sample flow payload."
+              action="Export JSON"
+              onClick={exportSnapshot}
+            />
+            <SettingAction
+              title="Reset local admin state"
+              description="Clear local read-notification flags and manual status audit cache."
+              action="Reset"
+              onClick={resetLocalState}
+            />
           </div>
         </section>
         <section className="rounded-xl border border-zinc-300 bg-white p-7">
-          <h2 className="text-xl font-black">Workspace</h2>
+          <h2 className="text-xl font-black">Active Configuration</h2>
           <div className="mt-5 space-y-4">
+            <SettingRow label="Admin role guard" value="Enabled" />
+            <SettingRow label="Global search" value="Customer / order / payment / shipment" />
             <SettingRow label="Admin route" value="/admin" />
             <SettingRow label="Data source" value="API Gateway" />
-            <SettingRow label="Theme" value="Operational Truth" />
+            <SettingRow label="Status controls" value="Validated transitions" />
           </div>
         </section>
       </div>
     </AdminPageFrame>
+  );
+}
+
+function SettingAction({
+  title,
+  description,
+  action,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-[#f8f6fc] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="font-black">{title}</div>
+        <div className="mt-1 text-sm text-zinc-600">{description}</div>
+      </div>
+      <button onClick={onClick} className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-bold hover:border-blue-400 hover:text-blue-700">
+        {action}
+      </button>
+    </div>
   );
 }
 
@@ -1101,4 +1479,3 @@ function SettingRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

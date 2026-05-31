@@ -23,15 +23,31 @@ async function ensurePaymentAdminData() {
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP(3)`);
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "expiredAt" TIMESTAMP(3)`);
 
-  const count = await prisma.payment.count();
-  if (count > 0) return;
+  await prisma.payment.deleteMany({
+    where: {
+      OR: [
+        { id: { startsWith: "pay-ts-" } },
+        { orderId: { startsWith: "order-ts-" } },
+        { idempotencyKey: { startsWith: "admin-seed-" } },
+      ],
+    },
+  });
 
-  const demoPayments = [
-    { orderId: "order-ts-9421", customerId: "user-customer-jordan", amount: 1205800, method: "STRIPE", status: "COMPLETED", transactionId: "ch_3Nf9Z8L2o9X" },
-    { orderId: "order-ts-9420", customerId: "user-customer-sarah", amount: 499000, method: "PAYPAL", status: "PENDING", transactionId: "txn_55029411" },
-    { orderId: "order-ts-9419", customerId: "user-customer-arthur", amount: 2840500, method: "BANK_TRANSFER", status: "COMPLETED", transactionId: "bnk_884210" },
-    { orderId: "order-ts-9418", customerId: "user-customer-liam", amount: 120000, method: "SEPAY_QR", status: "FAILED", transactionId: null },
-  ];
+  const methods = ["SEPAY_QR", "PAYPAL", "STRIPE", "BANK_TRANSFER"];
+  const paymentStatusForIndex = (index: number) => (index >= 56 ? "FAILED" : index <= 20 ? "PENDING" : "COMPLETED");
+  const demoPayments = Array.from({ length: 60 }, (_, index) => {
+    const orderIndex = index + 1;
+    const status = paymentStatusForIndex(orderIndex);
+    return {
+      id: `pay-ts-${9600 + orderIndex}`,
+      orderId: `order-ts-${9600 + orderIndex}`,
+      customerId: `user-flow-${String(orderIndex).padStart(2, "0")}`,
+      amount: 350000 + orderIndex * 45000,
+      method: methods[index % methods.length],
+      status,
+      transactionId: status === "COMPLETED" ? `PAID-TS-${9600 + orderIndex}` : null,
+    };
+  });
 
   for (const payment of demoPayments) {
     await prisma.payment.create({
@@ -45,7 +61,7 @@ async function ensurePaymentAdminData() {
     });
   }
 
-  console.log(`[${config.serviceName}] Seeded ${demoPayments.length} admin demo payments`);
+  console.log(`[${config.serviceName}] Ensured ${demoPayments.length} admin demo payments`);
 }
 
 async function main() {
@@ -93,11 +109,11 @@ async function main() {
       });
 
       for (const payment of expiredPayments) {
-        console.log(`[PaymentService Cron] Expiring payment ${payment.id} for order ${payment.orderId}`);
+        console.log(`[PaymentService Cron] Failing expired payment ${payment.id} for order ${payment.orderId}`);
         
         await prisma.payment.update({
           where: { id: payment.id },
-          data: { status: "EXPIRED" },
+          data: { status: "FAILED" },
         });
 
         const failEvent = createEvent<any>(
@@ -112,7 +128,7 @@ async function main() {
           payment.idempotencyKey,
           {
             provider: "SEPAY",
-            status: "EXPIRED",
+            status: "FAILED",
           }
         );
 

@@ -19,92 +19,68 @@ async function ensureOrderAdminData() {
   await prisma.$executeRawUnsafe(`ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "orderCode" TEXT NOT NULL DEFAULT ''`);
   await prisma.$executeRawUnsafe(`ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "paymentMethod" TEXT NOT NULL DEFAULT 'SEPAY_QR'`);
 
-  const count = await prisma.order.count();
-  if (count > 0) return;
+  await prisma.order.deleteMany({ where: { id: { startsWith: "order-ts-" } } });
 
-  const demoOrders = [
-    {
-      id: "order-ts-9421",
-      orderCode: "TS-9421",
-      customerId: "user-customer-jordan",
-      status: "DELIVERED",
-      paymentMethod: "STRIPE",
-      totalAmount: 1205800,
-      items: [
-        { productId: "SKU-7822-X", productName: "Quantum-X 32 inch Curved Display", quantity: 1, unitPrice: 899000 },
-        { productId: "SKU-9901-B", productName: "Mechanical Pro-Typist Keyboard", quantity: 1, unitPrice: 159000 },
-      ],
-      shippingAddress: {
-        fullName: "Jordan Smith",
-        phone: "+1 415 555 0198",
-        street: "1200 Market Street, Suite 450",
-        city: "San Francisco",
-        state: "CA",
-        zipCode: "94102",
-        country: "United States",
+  const makeOrder = (
+    index: number,
+    name: string,
+    status: string,
+    paymentMethod: string,
+    totalAmount: number,
+  ) => ({
+    id: `order-ts-${9600 + index}`,
+    orderCode: `TS-${9600 + index}`,
+    customerId: `user-flow-${String(index).padStart(2, "0")}`,
+    status,
+    paymentMethod,
+    totalAmount,
+    items: [
+      {
+        productId: `SKU-FLOW-${String(index).padStart(2, "0")}`,
+        productName: `${name} Validation Bundle`,
+        quantity: 1,
+        unitPrice: totalAmount,
       },
+    ],
+    shippingAddress: {
+      fullName: name,
+      phone: `+84 90 555 ${9600 + index}`,
+      street: `${index} Flow State Avenue`,
+      city: "Ho Chi Minh City",
+      state: "HCMC",
+      zipCode: "700000",
+      country: "Vietnam",
     },
-    {
-      id: "order-ts-9420",
-      orderCode: "TS-9420",
-      customerId: "user-customer-sarah",
-      status: "PENDING_PAYMENT",
-      paymentMethod: "PAYPAL",
-      totalAmount: 499000,
-      items: [
-        { productId: "PROD-004", productName: "AirPods Pro 2", quantity: 1, unitPrice: 499000 },
-      ],
-      shippingAddress: {
-        fullName: "Sarah Connor",
-        phone: "+1 212 555 0101",
-        street: "880 Mission Avenue",
-        city: "New York",
-        state: "NY",
-        zipCode: "10001",
-        country: "United States",
-      },
-    },
-    {
-      id: "order-ts-9419",
-      orderCode: "TS-9419",
-      customerId: "user-customer-arthur",
-      status: "SHIPPED",
-      paymentMethod: "BANK_TRANSFER",
-      totalAmount: 2840500,
-      items: [
-        { productId: "SKU-5541-M", productName: "Fiber Optic Switch 48p", quantity: 12, unitPrice: 236708.33 },
-      ],
-      shippingAddress: {
-        fullName: "Arthur Morgan",
-        phone: "+1 303 555 0120",
-        street: "77 Alpine Road",
-        city: "Denver",
-        state: "CO",
-        zipCode: "80202",
-        country: "United States",
-      },
-    },
-    {
-      id: "order-ts-9418",
-      orderCode: "TS-9418",
-      customerId: "user-customer-liam",
-      status: "CANCELLED",
-      paymentMethod: "SEPAY_QR",
-      totalAmount: 120000,
-      items: [
-        { productId: "SKU-1122", productName: "10m Optic Fiber Cable", quantity: 2, unitPrice: 60000 },
-      ],
-      shippingAddress: {
-        fullName: "Liam Neesson",
-        phone: "+1 650 555 0130",
-        street: "402 Harbor Lane",
-        city: "San Jose",
-        state: "CA",
-        zipCode: "95113",
-        country: "United States",
-      },
-    },
+  });
+
+  const names = [
+    "Ava", "Ben", "Chloe", "Dylan", "Emma", "Felix", "Gia", "Hugo", "Ivy", "Jack",
+    "Kira", "Leo", "Mina", "Noah", "Orla", "Piper", "Quinn", "Riley", "Sage", "Theo",
+    "Uma", "Vera", "Wade", "Xuan", "Yara", "Zane", "An", "Bao", "Cam", "Duc",
+    "Eli", "Finn", "Gwen", "Hana", "Ian", "Jade", "Kai", "Linh", "Mai", "Nico",
+    "Owen", "Paige", "Quan", "Rose", "Sean", "Tess", "Uyen", "Vinh", "Will", "Xena",
+    "Yen", "Zoe", "Ari", "Bree", "Cody", "Dara", "Evan", "Faye", "Gray", "Hope",
   ];
+  const paymentMethods = ["SEPAY_QR", "PAYPAL", "STRIPE", "BANK_TRANSFER"];
+  const statusForIndex = (index: number) => {
+    if (index <= 20) return "PENDING";
+    if (index <= 30) return "CONFIRMED";
+    if (index <= 40) return "PROCESSING";
+    if (index <= 55) return "COMPLETED";
+    return "FAILED";
+  };
+
+  const demoOrders = names.map((name, index) => {
+    const orderIndex = index + 1;
+    const status = statusForIndex(orderIndex);
+    return makeOrder(
+      orderIndex,
+      `${name} ${status}`,
+      status,
+      paymentMethods[index % paymentMethods.length],
+      350000 + orderIndex * 45000,
+    );
+  });
 
   for (const order of demoOrders) {
     await prisma.order.create({
@@ -116,7 +92,7 @@ async function ensureOrderAdminData() {
     });
   }
 
-  console.log(`[${config.serviceName}] Seeded ${demoOrders.length} admin demo orders`);
+  console.log(`[${config.serviceName}] Ensured ${demoOrders.length} admin demo orders`);
 }
 
 async function main() {

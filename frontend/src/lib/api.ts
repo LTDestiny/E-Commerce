@@ -278,10 +278,10 @@ export const ordersApi = {
     }),
   list: (all?: boolean) => fetchApi<Order[]>(`/api/orders${all ? "?all=true" : ""}`),
   get: (id: string) => fetchApi<Order>(`/api/orders/${id}`),
-  updateStatus: (id: string, status: string) =>
+  updateStatus: (id: string, status: string, reason?: string) =>
     fetchApi<Order>(`/api/orders/${id}/status`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     }),
   getEvents: (id: string) => fetchApi<StoredEvent[]>(`/api/orders/${id}/events`),
   getStats: () => fetchApi<OrderStats>("/api/orders/stats"),
@@ -329,6 +329,11 @@ export interface Payment {
 export const paymentsApi = {
   list: () => fetchApi<Payment[]>("/api/payments"),
   get: (id: string) => fetchApi<Payment>(`/api/payments/${id}`),
+  updateStatus: (id: string, payload: { status: string; reason?: string; transactionId?: string }) =>
+    fetchApi<Payment>(`/api/payments/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   getByOrder: (orderId: string) => fetchApi<Payment>(`/api/payments/order/${orderId}`),
   sepayIntent: (payload: { orderId: string; customerId: string; amount: number }) =>
     fetchApi<{
@@ -351,7 +356,7 @@ export const paymentsApi = {
       body: JSON.stringify(payload),
     }),
   sepaySimulate: (payload: { paymentId: string; status: "SUCCESS" | "FAILED" }) =>
-    fetchApi<{ ok: boolean; result: any }>("/api/payments/sepay/simulate", {
+    fetchApi<{ ok: boolean; result: unknown }>("/api/payments/sepay/simulate", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -374,6 +379,11 @@ export interface Shipment {
 export const shipmentsApi = {
   list: () => fetchApi<Shipment[]>("/api/shipments"),
   get: (id: string) => fetchApi<Shipment>(`/api/shipments/${id}`),
+  updateStatus: (id: string, payload: { status: string; reason?: string; trackingNumber?: string }) =>
+    fetchApi<Shipment>(`/api/shipments/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   getByOrder: (orderId: string) => fetchApi<Shipment>(`/api/shipments/order/${orderId}`),
 };
 
@@ -396,6 +406,11 @@ export const notificationsApi = {
   get: (id: string) => fetchApi<NotificationItem>(`/api/notifications/${id}`),
   getByOrder: (orderId: string) => fetchApi<NotificationItem[]>(`/api/notifications/order/${orderId}`),
   read: (id: string) => fetchApi<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+  updateStatus: (id: string, payload: { status: string; reason?: string }) =>
+    fetchApi<NotificationItem>(`/api/notifications/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   resend: (id: string) =>
     fetchApi<{ ok: boolean; notification: NotificationItem }>(`/api/notifications/${id}/resend`, {
       method: "POST",
@@ -408,6 +423,7 @@ export interface AdminUserRecord {
   name: string;
   email: string;
   role: string;
+  status?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -419,6 +435,11 @@ export const usersApi = {
     fetchApi<AdminUserRecord>(`/api/users/${id}/role`, {
       method: "PATCH",
       body: JSON.stringify({ role }),
+    }),
+  updateStatus: (id: string, payload: { status: string; reason?: string }) =>
+    fetchApi<AdminUserRecord>(`/api/users/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
 };
 

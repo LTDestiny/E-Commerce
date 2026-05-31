@@ -26,8 +26,38 @@ redisClient.on("error", (err) => {
 });
 
 function publicUser(user: { id: string; name: string; email: string; role: string }) {
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: (user as any).status || "ACTIVE",
+  };
 }
+
+type AdminUserProjection = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function adminUser(user: AdminUserProjection) {
+  return {
+    ...publicUser(user),
+    createdAt: user.createdAt.toISOString(),
+    updatedAt: user.updatedAt.toISOString(),
+  };
+}
+
+const USER_STATUS_TRANSITIONS: Record<string, string[]> = {
+  ACTIVE: ["SUSPENDED", "LOCKED"],
+  SUSPENDED: ["ACTIVE", "LOCKED"],
+  LOCKED: ["ACTIVE"],
+};
 
 async function requireAdmin(req: Request, res: Response): Promise<JwtUser | null> {
   const gatewayRole = req.headers["x-user-role"];
@@ -62,6 +92,8 @@ async function requireAdmin(req: Request, res: Response): Promise<JwtUser | null
 }
 
 async function ensureDemoUsers() {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'ACTIVE'`);
+
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@techsphere.local").toLowerCase().trim();
   const adminPassword = process.env.ADMIN_PASSWORD || "Admin@123456";
   const adminName = process.env.ADMIN_NAME || "Admin User";
@@ -83,9 +115,42 @@ async function ensureDemoUsers() {
     { id: "user-customer-sarah", name: "Sarah Connor", email: "sarah.connor@techsphere.local" },
     { id: "user-customer-arthur", name: "Arthur Morgan", email: "arthur.morgan@techsphere.local" },
     { id: "user-customer-liam", name: "Liam Neesson", email: "liam.neesson@techsphere.local" },
+    { id: "user-customer-mia", name: "Mia Wallace", email: "mia.wallace@techsphere.local" },
+    { id: "user-customer-olivia", name: "Olivia Bennett", email: "olivia.bennett@techsphere.local" },
+    { id: "user-test-nova", name: "Nova Flow Tester", email: "nova.flow@techsphere.local" },
+    { id: "user-flow-01", name: "Ava Pending", email: "ava.pending@techsphere.local" },
+    { id: "user-flow-02", name: "Ben Pending", email: "ben.pending@techsphere.local" },
+    { id: "user-flow-03", name: "Chloe Pending", email: "chloe.pending@techsphere.local" },
+    { id: "user-flow-04", name: "Dylan Pending", email: "dylan.pending@techsphere.local" },
+    { id: "user-flow-05", name: "Emma Pending", email: "emma.pending@techsphere.local" },
+    { id: "user-flow-06", name: "Felix Pending", email: "felix.pending@techsphere.local" },
+    { id: "user-flow-07", name: "Gia Pending", email: "gia.pending@techsphere.local" },
+    { id: "user-flow-08", name: "Hugo Pending", email: "hugo.pending@techsphere.local" },
+    { id: "user-flow-09", name: "Ivy Pending", email: "ivy.pending@techsphere.local" },
+    { id: "user-flow-10", name: "Jack Pending", email: "jack.pending@techsphere.local" },
+    { id: "user-flow-11", name: "Kira Reserved", email: "kira.reserved@techsphere.local" },
+    { id: "user-flow-12", name: "Leo Processing", email: "leo.processing@techsphere.local" },
+    { id: "user-flow-13", name: "Mina Paid", email: "mina.paid@techsphere.local" },
+    { id: "user-flow-14", name: "Noah Confirmed", email: "noah.confirmed@techsphere.local" },
+    { id: "user-flow-15", name: "Orla Scheduled", email: "orla.scheduled@techsphere.local" },
+    { id: "user-flow-16", name: "Piper Shipped", email: "piper.shipped@techsphere.local" },
+    { id: "user-flow-17", name: "Quinn Delivered", email: "quinn.delivered@techsphere.local" },
+    { id: "user-flow-18", name: "Riley Cancelled", email: "riley.cancelled@techsphere.local" },
+    { id: "user-flow-19", name: "Sage Expired", email: "sage.expired@techsphere.local" },
+    { id: "user-flow-20", name: "Theo Refunded", email: "theo.refunded@techsphere.local" },
   ];
 
-  for (const user of demoUsers) {
+  const generatedFlowUsers = Array.from({ length: 60 }, (_, index) => {
+    const flowIndex = index + 1;
+    return {
+      id: `user-flow-${String(flowIndex).padStart(2, "0")}`,
+      name: `Flow Customer ${String(flowIndex).padStart(2, "0")}`,
+      email: `flow.customer.${String(flowIndex).padStart(2, "0")}@techsphere.local`,
+    };
+  });
+  const allDemoUsers = [...demoUsers, ...generatedFlowUsers];
+
+  for (const user of allDemoUsers) {
     const existingById = await prisma.user.findUnique({ where: { id: user.id } });
     if (existingById) {
       await prisma.user.update({
@@ -108,7 +173,7 @@ async function ensureDemoUsers() {
     });
   }
 
-  console.log(`[AuthService] Ensured admin account ${adminEmail} and ${demoUsers.length} demo users`);
+  console.log(`[AuthService] Ensured admin account ${adminEmail} and ${allDemoUsers.length} demo users`);
 }
 
 function setRefreshCookie(res: Response, token: string) {
@@ -328,23 +393,13 @@ async function main() {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
 
-    const users = await prisma.user.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const users = await prisma.$queryRaw<AdminUserProjection[]>`
+      SELECT id, name, email, role, status, "createdAt", "updatedAt"
+      FROM users
+      ORDER BY "createdAt" DESC
+    `;
 
-    return res.json(users.map((user) => ({
-      ...publicUser(user),
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    })));
+    return res.json((users as unknown as AdminUserProjection[]).map(adminUser));
   });
 
   // GET /api/users/:id - Admin account detail
@@ -352,24 +407,16 @@ async function main() {
     const admin = await requireAdmin(req, res);
     if (!admin) return;
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const users = await prisma.$queryRaw<AdminUserProjection[]>`
+      SELECT id, name, email, role, status, "createdAt", "updatedAt"
+      FROM users
+      WHERE id = ${req.params.id}
+      LIMIT 1
+    `;
+    const user = users[0];
 
     if (!user) return res.status(404).json({ error: "User not found" });
-    return res.json({
-      ...publicUser(user),
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    });
+    return res.json(adminUser(user as unknown as AdminUserProjection));
   });
 
   // PATCH /api/users/:id/role - Admin role management
@@ -382,24 +429,69 @@ async function main() {
       return res.status(400).json({ error: "Role must be USER or ADMIN" });
     }
 
-    const user = await prisma.user.update({
+    await prisma.user.update({
       where: { id: req.params.id },
       data: { role },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-      },
     });
+    const users = await prisma.$queryRaw<AdminUserProjection[]>`
+      SELECT id, name, email, role, status, "createdAt", "updatedAt"
+      FROM users
+      WHERE id = ${req.params.id}
+      LIMIT 1
+    `;
+    const user = users[0];
 
-    return res.json({
-      ...publicUser(user),
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    });
+    return res.json(adminUser(user as unknown as AdminUserProjection));
+  });
+
+  // PATCH /api/users/:id/status - Admin account status control
+  app.patch("/api/users/:id/status", async (req, res) => {
+    const admin = await requireAdmin(req, res);
+    if (!admin) return;
+
+    if (admin.id === req.params.id) {
+      return res.status(400).json({ error: "Admins cannot change their own account status" });
+    }
+
+    const requestedStatus = String(req.body?.status || "").toUpperCase();
+    const reason = String(req.body?.reason || "").trim();
+    if (!Object.keys(USER_STATUS_TRANSITIONS).includes(requestedStatus)) {
+      return res.status(400).json({ error: "Invalid user account status" });
+    }
+
+    const currentRows = await prisma.$queryRaw<AdminUserProjection[]>`
+      SELECT id, name, email, role, status, "createdAt", "updatedAt"
+      FROM users
+      WHERE id = ${req.params.id}
+      LIMIT 1
+    `;
+    const current = currentRows[0];
+    if (!current) return res.status(404).json({ error: "User not found" });
+
+    const currentStatus = current.status || "ACTIVE";
+    const allowed = USER_STATUS_TRANSITIONS[currentStatus] || [];
+    if (!allowed.includes(requestedStatus)) {
+      return res.status(409).json({ error: `Transition ${currentStatus} -> ${requestedStatus} is not allowed` });
+    }
+
+    if (["SUSPENDED", "LOCKED"].includes(requestedStatus) && !reason) {
+      return res.status(400).json({ error: "Reason is required for suspend/lock actions" });
+    }
+
+    await prisma.$executeRaw`
+      UPDATE users
+      SET status = ${requestedStatus}, "updatedAt" = NOW()
+      WHERE id = ${req.params.id}
+    `;
+    const updatedRows = await prisma.$queryRaw<AdminUserProjection[]>`
+      SELECT id, name, email, role, status, "createdAt", "updatedAt"
+      FROM users
+      WHERE id = ${req.params.id}
+      LIMIT 1
+    `;
+    const user = updatedRows[0];
+
+    return res.json(adminUser(user as AdminUserProjection));
   });
 
   // POST /api/auth/forgot-password
