@@ -17,6 +17,7 @@ import {
   generateId,
   IdempotencyStore,
   RedisIdempotencyStore,
+  retryWithBackoff,
 } from "@ecommerce/shared";
 import { shipmentRepository } from "../models/shipment.repository";
 import { config } from "../config";
@@ -47,7 +48,13 @@ export function registerEventHandlers(
         }
 
         // Simulate scheduling delay
-        await sleep(config.simulation.schedulingDelayMs);
+        await retryWithBackoff(
+          async () => {
+            await sleep(config.simulation.schedulingDelayMs);
+          },
+          1,
+          500,
+        );
 
         // We need the shipping address from the original order
         // In a real system, we'd fetch this from Order Service or it would be in the event

@@ -3,6 +3,7 @@
 // ==========================================
 
 import { v4 as uuidv4 } from "uuid";
+import Redis from "ioredis";
 
 /**
  * Generate unique ID
@@ -75,7 +76,6 @@ export class IdempotencyStore {
  * Redis-backed Idempotency Store
  * Stores the result as JSON under a key with TTL (milliseconds)
  */
-import Redis from "ioredis";
 
 export class RedisIdempotencyStore {
   private redis: Redis;
@@ -109,6 +109,49 @@ export class RedisIdempotencyStore {
     } catch {
       return null;
     }
+  }
+
+  async disconnect(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+export class RedisSagaStore {
+  private redis: Redis;
+  private defaultTtlMs: number;
+  private prefix: string;
+
+  constructor(
+    redisUrl: string,
+    prefix = "saga:",
+    defaultTtlMs = 60 * 60 * 1000,
+  ) {
+    this.redis = new Redis(redisUrl);
+    this.prefix = prefix;
+    this.defaultTtlMs = defaultTtlMs;
+  }
+
+  private key(orderId: string): string {
+    return `${this.prefix}${orderId}`;
+  }
+
+  async get<T = unknown>(orderId: string): Promise<T | null> {
+    const raw = await this.redis.get(this.key(orderId));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async set(orderId: string, value: unknown, ttlMs?: number): Promise<void> {
+    const ttl = Math.ceil((ttlMs ?? this.defaultTtlMs) / 1000);
+    await this.redis.set(this.key(orderId), JSON.stringify(value), "EX", ttl);
+  }
+
+  async delete(orderId: string): Promise<void> {
+    await this.redis.del(this.key(orderId));
   }
 
   async disconnect(): Promise<void> {

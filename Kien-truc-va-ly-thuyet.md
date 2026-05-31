@@ -15,7 +15,7 @@ Các thành phần chính:
 | Payment Service | Mô phỏng thanh toán, hoàn tiền, idempotency, circuit breaker | Node.js, Express, Prisma, PostgreSQL |
 | Shipping Service | Tạo vận đơn, cập nhật trạng thái giao hàng | Node.js, Express, Prisma, PostgreSQL |
 | Notification Service | Gửi và lưu log thông báo | Node.js, Express, Prisma, PostgreSQL |
-| Redis | Event Bus cho publish/subscribe giữa các service | Redis Pub/Sub |
+| Redis | Event Bus cho publish/subscribe giữa các service + rate limit store + idempotency store | Redis Pub/Sub + Redis-backed limiter/idempotency |
 | PostgreSQL | Lưu dữ liệu nghiệp vụ và event log cục bộ từng service | PostgreSQL |
 | Docker Compose | Chạy hạ tầng và các service | Docker |
 
@@ -150,7 +150,7 @@ Tuy nhiên, nếu áp dụng production thật, cần cải thiện:
 - Thêm retry policy và dead letter queue.
 - Lưu saga state vào database thay vì memory.
 - Bổ sung distributed tracing bằng OpenTelemetry.
-- Bổ sung authentication, authorization và rate limiting.
+- Bổ sung authentication, authorization và mở rộng rate limiting theo route/user/service.
 - Bổ sung test tự động và CI/CD.
 - Chuẩn hóa event schema/versioning.
 
@@ -358,7 +358,7 @@ API Gateway hợp lý vì:
 Điểm cần cải thiện nếu production:
 
 - Thêm authentication/authorization.
-- Thêm rate limiting.
+- Thêm rate limiting theo route, user và service.
 - Thêm request logging/correlation ID.
 - Thêm timeout/retry cho proxy.
 - Có thể dùng Kong, NGINX, Traefik hoặc cloud API Gateway thay vì tự viết bằng Express.

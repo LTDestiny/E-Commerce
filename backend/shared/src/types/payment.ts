@@ -17,6 +17,7 @@ export enum PaymentMethod {
   BANK_TRANSFER = "BANK_TRANSFER",
   E_WALLET = "E_WALLET",
   COD = "COD",
+  SEPAY_QR = "SEPAY_QR",
 }
 
 export interface Payment {
