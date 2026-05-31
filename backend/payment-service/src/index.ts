@@ -4,7 +4,7 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus, KafkaEventBus } from "@ecommerce/shared";
+import { RedisEventBus, KafkaEventBus, createEvent } from "@ecommerce/shared";
 import { config } from "./config";
 import { createPaymentRoutes } from "./routes/payment.routes";
 import { registerEventHandlers } from "./handlers/payment.handler";
@@ -42,6 +42,49 @@ async function main() {
   registerEventHandlers(eventBus, eventStore);
 
   app.use("/api/payments", createPaymentRoutes(eventBus, eventStore));
+
+  // Start Payment Expiration Cron Job (runs every 5 minutes)
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const expiredPayments = await prisma.payment.findMany({
+        where: {
+          status: "PENDING",
+          expiredAt: { lt: now },
+        },
+      });
+
+      for (const payment of expiredPayments) {
+        console.log(`[PaymentService Cron] Expiring payment ${payment.id} for order ${payment.orderId}`);
+        
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: { status: "EXPIRED" },
+        });
+
+        const failEvent = createEvent<any>(
+          "PAYMENT_FAILED",
+          config.serviceName,
+          {
+            orderId: payment.orderId,
+            paymentId: payment.id,
+            reason: "Payment expired (expiredAt passed)",
+            retryable: false,
+          },
+          payment.idempotencyKey,
+          {
+            provider: "SEPAY",
+            status: "EXPIRED",
+          }
+        );
+
+        await eventStore.append(failEvent);
+        await eventBus.publish("payment.failed", failEvent);
+      }
+    } catch (e) {
+      console.error("[PaymentService Cron] Error in payment expire cron job:", e);
+    }
+  }, 5 * 60 * 1000);
 
   app.get("/health", (_req, res) => {
     (async () => {

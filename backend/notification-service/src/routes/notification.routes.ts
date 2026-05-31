@@ -12,10 +12,16 @@ export function createNotificationRoutes(
 ): Router {
   const router = Router();
 
-  // GET /api/notifications - List all notifications
-  router.get("/", async (_req: Request, res: Response) => {
+  // GET /api/notifications - List notifications for the authenticated customer
+  router.get("/", async (req: Request, res: Response) => {
     try {
-      const notifications = await notificationRepository.findAll();
+      const customerId = req.headers["x-user-id"];
+      if (!customerId) {
+        res.status(401).json({ error: "Missing identity header" });
+        return;
+      }
+      
+      const notifications = await notificationRepository.findByCustomerId(String(customerId));
       res.json(notifications);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
@@ -29,6 +35,20 @@ export function createNotificationRoutes(
         req.params.orderId,
       );
       res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/notifications/:id/read - Mark notification as read
+  router.patch("/:id/read", async (req: Request, res: Response) => {
+    try {
+      const notification = await notificationRepository.markAsRead(req.params.id);
+      if (!notification) {
+        res.status(404).json({ error: "Notification not found" });
+        return;
+      }
+      res.json({ ok: true, notification });
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }

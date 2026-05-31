@@ -14,6 +14,7 @@ export type NotificationRow = {
   subject: string;
   body: string;
   status: string;
+  isRead: boolean;
   sentAt: Date | null;
   createdAt: Date;
 };

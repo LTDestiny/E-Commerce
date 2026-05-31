@@ -217,6 +217,31 @@ export interface Payment {
 export const paymentsApi = {
   list: () => fetchApi<Payment[]>("/api/payments"),
   getByOrder: (orderId: string) => fetchApi<Payment>(`/api/payments/order/${orderId}`),
+  sepayIntent: (payload: { orderId: string; customerId: string; amount: number }) =>
+    fetchApi<{
+      ok: boolean;
+      payment: Payment;
+      qrPayload: {
+        provider: string;
+        bankName: string;
+        account: string;
+        orderId: string;
+        paymentId: string;
+        amount: number;
+        currency: string;
+        method: string;
+        template: string;
+      };
+      webhookUrl: string;
+    }>("/api/payments/sepay/intent", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  sepaySimulate: (payload: { paymentId: string; status: "SUCCESS" | "FAILED" }) =>
+    fetchApi<{ ok: boolean; result: any }>("/api/payments/sepay/simulate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ----- Shipments -----
@@ -245,6 +270,7 @@ export interface NotificationItem {
   subject: string;
   body: string;
   status: string;
+  isRead: boolean;
   sentAt?: string;
   createdAt: string;
 }
@@ -252,6 +278,7 @@ export interface NotificationItem {
 export const notificationsApi = {
   list: () => fetchApi<NotificationItem[]>("/api/notifications"),
   getByOrder: (orderId: string) => fetchApi<NotificationItem[]>(`/api/notifications/order/${orderId}`),
+  read: (id: string) => fetchApi<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
 };
 
 // ----- Health -----

@@ -173,5 +173,27 @@ export function registerEventHandlers(
     },
   );
 
+  // ----- Listen: Payment Processed → Deduct Stock -----
+  eventBus.subscribe(
+    EVENT_CHANNELS.PAYMENT_PROCESSED,
+    async (event: DomainEvent) => {
+      if (event.type !== "PAYMENT_PROCESSED") return;
+      await eventStore.append(event);
+
+      try {
+        const { orderId } = event.payload;
+        const deducted = await inventoryRepository.confirmStockDeduction(orderId);
+        if (deducted) {
+          console.log(
+            `[${config.serviceName}] 📦 Stock permanently deducted for order ${orderId}`,
+          );
+        }
+      } catch (err) {
+        console.error(`[${config.serviceName}] Stock deduction error:`, err);
+        throw err;
+      }
+    },
+  );
+
   console.log(`[${config.serviceName}] Event handlers registered`);
 }

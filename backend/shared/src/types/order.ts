@@ -13,6 +13,9 @@ export enum OrderStatus {
   DELIVERED = "DELIVERED",
   CANCELLED = "CANCELLED",
   REFUNDED = "REFUNDED",
+  PENDING_PAYMENT = "PENDING_PAYMENT",
+  PAID = "PAID",
+  EXPIRED = "EXPIRED",
 }
 
 export interface OrderItem {
@@ -34,11 +37,13 @@ export interface ShippingAddress {
 
 export interface Order {
   id: string;
+  orderCode?: string;
   customerId: string;
   items: OrderItem[];
   totalAmount: number;
   shippingAddress: ShippingAddress;
   status: OrderStatus;
+  paymentMethod?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,4 +52,5 @@ export interface CreateOrderRequest {
   customerId: string;
   items: OrderItem[];
   shippingAddress: ShippingAddress;
+  paymentMethod?: string;
 }

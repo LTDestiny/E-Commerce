@@ -12,17 +12,22 @@ datasource db {
 }
 
 model Payment {
-  id             String   @id @default(uuid())
-  orderId        String
-  customerId     String
-  amount         Float
-  currency       String   @default("VND")
-  method         String   @default("CREDIT_CARD")
-  status         String   @default("PENDING")
-  transactionId  String?
-  idempotencyKey String   @unique
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String    @id @default(uuid())
+  orderId         String
+  customerId      String
+  amount          Float
+  currency        String    @default("VND")
+  method          String    @default("CREDIT_CARD")
+  status          String    @default("PENDING")
+  transactionId   String?
+  idempotencyKey  String    @unique
+  provider        String    @default("SEPAY")
+  qrCode          String?
+  transferContent String?
+  paidAt          DateTime?
+  expiredAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([orderId])
   @@map("payments")

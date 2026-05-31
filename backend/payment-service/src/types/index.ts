@@ -16,6 +16,11 @@ export type PaymentRow = {
   status: string;
   transactionId: string | null;
   idempotencyKey: string;
+  provider: string;
+  qrCode: string | null;
+  transferContent: string | null;
+  paidAt: Date | null;
+  expiredAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

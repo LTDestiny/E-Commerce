@@ -19,6 +19,7 @@ function toNotification(row: NotificationRow): Notification {
     subject: row.subject,
     body: row.body,
     status: row.status as NotificationStatus,
+    isRead: row.isRead,
     sentAt: row.sentAt?.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -40,6 +41,7 @@ class NotificationRepository {
         subject,
         body,
         status: NotificationStatus.PENDING,
+        isRead: false,
       },
     });
     return toNotification(row);
@@ -47,6 +49,14 @@ class NotificationRepository {
 
   async findAll(): Promise<Notification[]> {
     const rows = await prisma.notification.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map(toNotification);
+  }
+
+  async findByCustomerId(customerId: string): Promise<Notification[]> {
+    const rows = await prisma.notification.findMany({
+      where: { customerId },
       orderBy: { createdAt: "desc" },
     });
     return rows.map(toNotification);
@@ -78,6 +88,18 @@ class NotificationRepository {
       const row = await prisma.notification.update({
         where: { id },
         data,
+      });
+      return toNotification(row);
+    } catch {
+      return null;
+    }
+  }
+
+  async markAsRead(id: string): Promise<Notification | null> {
+    try {
+      const row = await prisma.notification.update({
+        where: { id },
+        data: { isRead: true },
       });
       return toNotification(row);
     } catch {
