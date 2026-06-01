@@ -1,7 +1,6 @@
 services:
   redis:
     image: redis:7-alpine
-    container_name: ecommerce-redis
     ports:
       - "6379:6379"
     volumes:
@@ -15,7 +14,6 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: ecommerce-postgres
     ports:
       - "5433:5432"
     environment:
@@ -34,14 +32,12 @@ services:
 
   zookeeper:
     image: zookeeper:latest
-    container_name: ecommerce-zookeeper
     ports:
       - "2181:2181"
     restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.3.0
-    container_name: ecommerce-kafka
     ports:
       - "9092:9092"
       - "29092:29092"
@@ -61,14 +57,13 @@ services:
     build:
       context: .
       dockerfile: auth-service/Dockerfile
-    container_name: ecommerce-auth-service
     ports:
       - "4006:4006"
     env_file:
       - auth-service/.env
     environment:
       PORT: 4006
-      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000,http://localhost:3001
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/ecommerce_auth?schema=public
       JWT_ACCESS_SECRET: change_me_access_secret
       JWT_REFRESH_SECRET: change_me_refresh_secret
@@ -100,13 +95,12 @@ services:
     build:
       context: .
       dockerfile: api-gateway/Dockerfile
-    container_name: ecommerce-api-gateway
     ports:
       - "4000:4000"
     environment:
       PORT: 4000
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000,http://localhost:3001
       AUTH_SERVICE_URL: http://auth-service:4006
       ORDER_SERVICE_URL: http://order-service:4001
       PAYMENT_SERVICE_URL: http://payment-service:4002
@@ -153,13 +147,12 @@ services:
     build:
       context: .
       dockerfile: order-service/Dockerfile
-    container_name: ecommerce-order-service
     ports:
       - "4001:4001"
     environment:
       PORT: 4001
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/order_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: order-service
@@ -188,7 +181,6 @@ services:
     build:
       context: .
       dockerfile: payment-service/Dockerfile
-    container_name: ecommerce-payment-service
     ports:
       - "4002:4002"
     env_file:
@@ -196,7 +188,7 @@ services:
     environment:
       PORT: 4002
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/payment_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: payment-service
@@ -225,13 +217,12 @@ services:
     build:
       context: .
       dockerfile: inventory-service/Dockerfile
-    container_name: ecommerce-inventory-service
     ports:
       - "4003:4003"
     environment:
       PORT: 4003
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/inventory_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: inventory-service
@@ -260,13 +251,12 @@ services:
     build:
       context: .
       dockerfile: shipping-service/Dockerfile
-    container_name: ecommerce-shipping-service
     ports:
       - "4004:4004"
     environment:
       PORT: 4004
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/shipping_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: shipping-service
@@ -295,13 +285,12 @@ services:
     build:
       context: .
       dockerfile: notification-service/Dockerfile
-    container_name: ecommerce-notification-service
     ports:
       - "4005:4005"
     environment:
       PORT: 4005
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/notification_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: notification-service
@@ -330,7 +319,6 @@ services:
     build:
       context: .
       dockerfile: ai-service/Dockerfile
-    container_name: ecommerce-ai-service
     ports:
       - "4007:4007"
     env_file:
@@ -338,7 +326,7 @@ services:
     environment:
       PORT: 4007
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       INVENTORY_SERVICE_URL: http://inventory-service:4003
     restart: unless-stopped
     depends_on:
@@ -367,7 +355,7 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://47.129.201.126:4000
     command: npm run dev -- --hostname 0.0.0.0 --port 3000 --webpack
     volumes:
       - ../frontend:/app
