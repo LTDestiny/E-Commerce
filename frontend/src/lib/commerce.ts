@@ -20,7 +20,8 @@ export type ProductMeta = {
 };
 
 export async function fetchCatalogProducts(): Promise<ProductMeta[]> {
-  const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/inventory`);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  const response = await fetch(`${apiBase}/api/inventory`);
   if (!response.ok) return [];
   const inventory = (await response.json()) as any[];
   return inventory.map((item) => {

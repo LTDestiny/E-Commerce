@@ -8,7 +8,7 @@ import {
   mergeGuestCartIntoUser,
 } from "@/lib/cart";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const TOKEN_KEY = "techsphere_auth_token";
 const USER_KEY = "techsphere_auth_user";
 const ROLE_COOKIE_KEY = "auth_role";
