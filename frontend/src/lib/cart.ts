@@ -1,9 +1,26 @@
-import { PRODUCT_CATALOG, getProductMeta } from "@/lib/commerce";
+import { getProductMeta, type ProductMeta } from "@/lib/commerce";
 
 export type Cart = Record<string, number>;
 
-export type CartItem = ReturnType<typeof getProductMeta> & {
+export type CartItem = ProductMeta & {
   quantity: number;
+};
+
+type InventoryProductLike = {
+  productId: string;
+  productName: string;
+  price?: number | null;
+  category?: string | null;
+  shortDescription?: string | null;
+  description?: string | null;
+  specs?: string[] | null;
+  accentClass?: string | null;
+  rating?: number | null;
+  sold?: number | null;
+  warranty?: string | null;
+  image?: string | null;
+  images?: string[] | null;
+  availableStock?: number | null;
 };
 
 const CART_KEY = "techsphere_cart";
@@ -52,11 +69,8 @@ function parseCart(raw: string | null): Cart {
     return Object.entries(parsed as Record<string, unknown>).reduce<Cart>(
       (next, [productId, rawQuantity]) => {
         const quantity = Number(rawQuantity);
-        const knownProduct = PRODUCT_CATALOG.some(
-          (product) => product.id === productId,
-        );
 
-        if (knownProduct && Number.isFinite(quantity) && quantity > 0) {
+        if (productId.trim() && Number.isFinite(quantity) && quantity > 0) {
           next[productId] = quantity;
         }
 
@@ -140,9 +154,37 @@ export function clearGuestCart() {
   notifyCartUpdated();
 }
 
-export function getCartItems(cart: Cart): CartItem[] {
+function productMetaFromInventory(item: InventoryProductLike): ProductMeta {
+  return {
+    id: item.productId,
+    name: item.productName,
+    price: item.price ?? 150000,
+    category: item.category ?? "Linh kiện",
+    shortDescription:
+      item.shortDescription ?? `Tồn kho còn ${item.availableStock ?? "không rõ"}`,
+    description: item.description ?? "Sản phẩm công nghệ.",
+    specs: Array.isArray(item.specs) ? item.specs : [],
+    accentClass: item.accentClass ?? "from-slate-800 to-slate-500",
+    rating: item.rating ?? 4.5,
+    sold: item.sold ?? 10,
+    warranty: item.warranty ?? "12 tháng chính hãng",
+    image: item.image ?? item.images?.[0] ?? undefined,
+  };
+}
+
+export function getCartItems(
+  cart: Cart,
+  inventory: InventoryProductLike[] = [],
+): CartItem[] {
+  const productById = new Map(
+    inventory.map((item) => [item.productId, productMetaFromInventory(item)]),
+  );
+
   return Object.entries(cart)
-    .map(([productId, quantity]) => ({ ...getProductMeta(productId), quantity }))
+    .map(([productId, quantity]) => ({
+      ...(productById.get(productId) ?? getProductMeta(productId)),
+      quantity,
+    }))
     .filter((item) => item.quantity > 0);
 }
 
@@ -150,8 +192,11 @@ export function getCartCount(cart: Cart): number {
   return Object.values(cart).reduce((sum, quantity) => sum + quantity, 0);
 }
 
-export function getCartTotal(cart: Cart): number {
-  return getCartItems(cart).reduce(
+export function getCartTotal(
+  cart: Cart,
+  inventory: InventoryProductLike[] = [],
+): number {
+  return getCartItems(cart, inventory).reduce(
     (sum, item) => sum + item.price * item.quantity,
     0,
   );
