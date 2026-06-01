@@ -102,22 +102,32 @@ export function createPaymentRoutes(
         return;
       }
 
-      const payment = await paymentRepository.create(
+      const activeBankName = bankName || config.sepay.bankName;
+      const activeAccount = account || config.sepay.paymentAccount;
+      const transferContent = `SEPAY ${String(orderId).slice(0, 8)}`;
+      const qrCode = `https://img.vietqr.io/image/${activeBankName}-${activeAccount}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(transferContent)}`;
+      const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+
+      const payment = await paymentRepository.createSepay(
         String(orderId),
         String(customerId),
         Number(amount),
+        qrCode,
+        transferContent,
+        expiredAt
       );
 
       const qrPayload = {
         provider: config.sepay.providerName,
-        bankName: bankName || config.sepay.bankName,
-        account: account || config.sepay.paymentAccount,
+        bankName: activeBankName,
+        account: activeAccount,
         orderId: payment.orderId,
         paymentId: payment.id,
         amount: payment.amount,
         currency: payment.currency,
         method: payment.method,
         template: config.sepay.qrTemplate,
+        transferContent,
       };
 
       res.json({
@@ -189,17 +199,53 @@ export function createPaymentRoutes(
 
   router.post("/sepay/webhook", async (req: Request, res: Response) => {
     try {
-      const signature = String(req.header("x-sepay-signature") || "");
+      const authHeader = String(req.header("Authorization") || "");
+      const signature = req.header("x-sepay-signature") || req.header("X-SePay-Signature");
       const rawBody = Buffer.isBuffer(req.body)
         ? req.body.toString("utf8")
         : JSON.stringify(req.body || {});
-      const expected = crypto
-        .createHmac("sha256", config.sepay.webhookSecret)
-        .update(rawBody)
-        .digest("hex");
 
-      if (signature !== expected) {
-        res.status(401).json({ error: "Invalid webhook signature" });
+      let authorized = false;
+
+      // 1. Verify via API Key (Authorization: Apikey <API_KEY>)
+      if (authHeader.startsWith("Apikey ")) {
+        const apiKey = authHeader.substring(7).trim();
+        if (apiKey === config.sepay.webhookSecret) {
+          authorized = true;
+        }
+      }
+
+      // 2. Verify via HMAC-SHA256 signature
+      if (!authorized && signature) {
+        const cleanSignature = signature.startsWith("sha256=")
+          ? signature.substring(7)
+          : signature;
+
+        const expected = crypto
+          .createHmac("sha256", config.sepay.webhookSecret)
+          .update(rawBody)
+          .digest("hex");
+
+        if (cleanSignature === expected) {
+          authorized = true;
+        }
+      }
+
+      // 3. Bypass signature check for local testing / troubleshooting if configured
+      if (!authorized && process.env.SEPAY_BYPASS_SIGNATURE === "true") {
+        console.warn("[PaymentService] Bypassing SePay Webhook signature verification because SEPAY_BYPASS_SIGNATURE is set to true.");
+        authorized = true;
+      }
+
+      if (!authorized) {
+        const expected = signature ? crypto
+          .createHmac("sha256", config.sepay.webhookSecret)
+          .update(rawBody)
+          .digest("hex") : "";
+        console.warn(
+          `[PaymentService] Unauthorized SePay Webhook request. Received signature: ${signature}, Expected: ${expected}. isBuffer: ${Buffer.isBuffer(req.body)}. Raw body: "${rawBody}"`
+        );
+        res.status(401).json({ error: "Invalid webhook signature or Apikey" });
         return;
       }
 
@@ -215,12 +261,16 @@ export function createPaymentRoutes(
         return;
       }
 
+      console.log(`[PaymentService Webhook Debug] Received transferContent: "${transferContent}", amount: ${amount}, transactionId: "${bankTransactionId}"`);
       let payment = null;
       if (payload.paymentId) {
         payment = await paymentRepository.findById(payload.paymentId);
+        console.log(`[PaymentService Webhook Debug] Searched by paymentId: "${payload.paymentId}". Found:`, payment ? payment.id : "null");
       } else {
         const payments = await paymentRepository.findAll();
-        payment = payments.find(p => p.transferContent && transferContent.includes(p.transferContent.trim()));
+        console.log("[PaymentService Webhook Debug] All payments in DB:", payments.map(p => ({ id: p.id, orderId: p.orderId, amount: p.amount, transferContent: p.transferContent, status: p.status })));
+        payment = payments.find(p => p.transferContent && transferContent.toUpperCase().includes(p.transferContent.trim().toUpperCase()));
+        console.log(`[PaymentService Webhook Debug] Searched by transferContent. Found:`, payment ? payment.id : "null");
       }
 
       if (!payment) {
@@ -268,7 +318,7 @@ export function createPaymentRoutes(
         await eventStore.append(processedEvent);
         await eventBus.publish(EVENT_CHANNELS.PAYMENT_PROCESSED, processedEvent);
 
-        res.json({ ok: true, payment: updated });
+        res.json({ success: true, ok: true, payment: updated });
         return;
       }
 

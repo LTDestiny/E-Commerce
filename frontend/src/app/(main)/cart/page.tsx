@@ -497,59 +497,17 @@ export default function CartPage() {
                 </div>
               </div>
 
-              {/* Simulation section & Actions */}
+              {/* Actions */}
               <div className="border-t bg-muted/20 p-6 space-y-4">
-                <div className="rounded-xl border border-dashed border-orange-500/30 bg-orange-500/5 p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
-                    <h5 className="text-xs font-bold text-orange-600 uppercase tracking-wider">Môi trường thử nghiệm (Developer Sandbox)</h5>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Sử dụng các nút bên dưới để giả lập tín hiệu webhook thanh toán từ cổng ngân hàng SePay gửi về hệ thống của chúng tôi để tự động xác nhận đơn hàng:
-                  </p>
-                  
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="bg-green-600/10 hover:bg-green-600 hover:text-white border-green-600/30 text-green-600 text-xs gap-1.5"
-                      disabled={!sepayIntentData || simulatingPayment !== null}
-                      onClick={() => handleSimulatePayment("SUCCESS")}
-                    >
-                      {simulatingPayment === "SUCCESS" ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      )}
-                      Giả lập Thành công
-                    </Button>
-                    
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="bg-red-600/10 hover:bg-red-600 hover:text-white border-red-600/30 text-red-600 text-xs gap-1.5"
-                      disabled={!sepayIntentData || simulatingPayment !== null}
-                      onClick={() => handleSimulatePayment("FAILED")}
-                    >
-                      {simulatingPayment === "FAILED" ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5" />
-                      )}
-                      Giả lập Thất bại
-                    </Button>
-                  </div>
-
-                  {simulationStatusMessage && (
-                    <motion.p
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="text-xs font-medium text-foreground mt-2"
-                    >
-                      {simulationStatusMessage}
-                    </motion.p>
-                  )}
-                </div>
+                {simulationStatusMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 text-sm font-medium text-foreground text-center"
+                  >
+                    {simulationStatusMessage}
+                  </motion.div>
+                )}
 
                 <div className="flex justify-between items-center pt-2">
                   <Button

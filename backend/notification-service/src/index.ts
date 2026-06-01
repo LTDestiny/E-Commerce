@@ -12,8 +12,22 @@ import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
 
 async function main() {
-  await prisma.$connect();
-  console.log(`[${config.serviceName}] Connected to PostgreSQL`);
+  // Connect to PostgreSQL with retry
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      await prisma.$connect();
+      console.log(`[${config.serviceName}] Connected to PostgreSQL`);
+      break;
+    } catch (err) {
+      retries -= 1;
+      console.warn(`[${config.serviceName}] Database connection failed. Retries left: ${retries}. Error:`, err);
+      if (retries === 0) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
 
   const app = express();
   app.use(cors({ origin: config.cors.origin }));
