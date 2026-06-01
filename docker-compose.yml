@@ -370,11 +370,6 @@ services:
       retries: 3
       start_period: 30s
 
-volumes:
-  redis-data:
-  postgres-data:
-
-  # Nginx reverse proxy to expose a single public origin and proxy /api
   nginx:
     image: nginx:stable-alpine
     container_name: ecommerce-nginx
@@ -386,5 +381,6 @@ volumes:
       - frontend
       - api-gateway
     restart: unless-stopped
-
-  # Nginx reverse proxy to expose a single public origin and proxy /api
+  volumes:
+  redis-data:
+  postgres-data:
