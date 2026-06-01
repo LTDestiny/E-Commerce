@@ -18,6 +18,7 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  createEventStream,
   healthApi,
   inventoryApi,
   notificationsApi,
@@ -58,7 +59,7 @@ type LoadState = {
   data: AdminData;
   loading: boolean;
   error: string | null;
-  reload: () => Promise<void>;
+  reload: (silent?: boolean) => Promise<void>;
 };
 
 const emptyData: AdminData = {
@@ -76,9 +77,11 @@ function useAdminData(): LoadState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const reload = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     const [orders, inventory, payments, shipments, notifications, users, health] =
       await Promise.allSettled([
         ordersApi.list(true),
@@ -100,7 +103,7 @@ function useAdminData(): LoadState {
       health: health.status === "fulfilled" ? health.value : null,
     };
 
-    if (orders.status === "rejected") {
+    if (orders.status === "rejected" && !silent) {
       setError("Khong tai duoc du lieu admin. Hay kiem tra token admin va backend.");
     }
 
@@ -110,6 +113,20 @@ function useAdminData(): LoadState {
 
   useEffect(() => {
     queueMicrotask(() => void reload());
+  }, [reload]);
+
+  useEffect(() => {
+    const es = createEventStream(
+      (event) => {
+        if (event && event.type !== "CONNECTED") {
+          void reload(true);
+        }
+      },
+      () => {}
+    );
+    return () => {
+      es.close();
+    };
   }, [reload]);
 
   return { data, loading, error, reload };
@@ -609,9 +626,11 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setLoadError(null);
+    }
     const [orderResult, paymentResult, shipmentResult, notificationResult, eventResult] =
       await Promise.allSettled([
         ordersApi.get(orderId),
@@ -621,7 +640,9 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
         ordersApi.getEvents(orderId),
       ]);
     setOrder(orderResult.status === "fulfilled" ? orderResult.value : null);
-    setLoadError(orderResult.status === "rejected" ? orderResult.reason?.message || "Khong tai duoc don hang." : null);
+    if (orderResult.status === "rejected" && !silent) {
+      setLoadError(orderResult.reason?.message || "Khong tai duoc don hang.");
+    }
     setPayment(paymentResult.status === "fulfilled" ? paymentResult.value : null);
     setShipment(shipmentResult.status === "fulfilled" ? shipmentResult.value : null);
     setNotifications(notificationResult.status === "fulfilled" ? notificationResult.value : []);
@@ -631,6 +652,20 @@ export function AdminOrderDetailPage({ orderId }: { orderId: string }) {
 
   useEffect(() => {
     queueMicrotask(() => void load());
+  }, [load]);
+
+  useEffect(() => {
+    const es = createEventStream(
+      (event) => {
+        if (event && event.type !== "CONNECTED") {
+          void load(true);
+        }
+      },
+      () => {}
+    );
+    return () => {
+      es.close();
+    };
   }, [load]);
 
   const resendEmail = async () => {

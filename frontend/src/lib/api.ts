@@ -187,6 +187,12 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register")) {
+      clearAuthSession();
+      if (typeof window !== "undefined" && window.location.pathname !== "/auth") {
+        window.location.href = `/auth?next=${encodeURIComponent(window.location.pathname)}`;
+      }
+    }
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(`${res.status} ${path}: ${error.error || "API Error"}`);
   }
