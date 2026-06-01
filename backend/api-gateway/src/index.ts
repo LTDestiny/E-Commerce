@@ -72,6 +72,14 @@ function createCircuitGuard(serviceName: string, pathFilter: string) {
       return;
     }
 
+    // Circuit just closed after cooldown — reset failure counter
+    if (state.openedUntil > 0 && retryAfterMs <= 0) {
+      console.log(`[APIGateway] Circuit closed for ${serviceName}, resetting failure count`);
+      state.failures = 0;
+      state.openedUntil = 0;
+      state.lastError = undefined;
+    }
+
     next();
   };
 }
