@@ -124,3 +124,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Ensure pointer cursor for common hoverable elements */
+@layer utilities {
+  a:hover,
+  button:hover,
+  [role="button"]:hover,
+  .clickable:hover,
+  .hoverable:hover,
+  [data-hoverable]:hover {
+    cursor: pointer;
+  }
+}
