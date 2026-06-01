@@ -18,11 +18,20 @@ import { config } from "../config";
 
 function serviceHeaders(clientHeaders?: any): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (!clientHeaders) return headers;
-  if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
-  if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
-  if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
-  if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
+  if (clientHeaders) {
+    if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
+    if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
+    if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
+    if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
+  }
+
+  if (!headers["x-user-id"]) {
+    headers["x-user-id"] = "payment-service";
+    headers["x-user-email"] = "payment-service@internal.local";
+    headers["x-user-role"] = "ADMIN";
+    headers["x-user-name"] = encodeURIComponent("Payment Service");
+  }
+
   return headers;
 }
 
@@ -462,6 +471,12 @@ export function createPaymentRoutes(
       }
 
       if (payment.status === PaymentStatus.COMPLETED) {
+        await syncOperationalStatusAfterPayment(
+          payment,
+          PaymentStatus.COMPLETED,
+          "Duplicate SePay callback resync",
+          req.headers,
+        );
         res.json({ ok: true, message: "Duplicate callback - already completed", duplicated: true });
         return;
       }
@@ -500,6 +515,14 @@ export function createPaymentRoutes(
 
         await eventStore.append(processedEvent);
         await eventBus.publish(EVENT_CHANNELS.PAYMENT_PROCESSED, processedEvent);
+        if (updated) {
+          await syncOperationalStatusAfterPayment(
+            updated,
+            PaymentStatus.COMPLETED,
+            "Payment captured by SePay webhook",
+            req.headers,
+          );
+        }
 
         res.json({ success: true, ok: true, payment: updated });
         return;
@@ -530,6 +553,14 @@ export function createPaymentRoutes(
 
       await eventStore.append(failedEvent);
       await eventBus.publish(EVENT_CHANNELS.PAYMENT_FAILED, failedEvent);
+      if (updated) {
+        await syncOperationalStatusAfterPayment(
+          updated,
+          PaymentStatus.FAILED,
+          payload.reason || "SePay webhook reported failure",
+          req.headers,
+        );
+      }
 
       res.json({ ok: true, payment: updated });
     } catch (error) {

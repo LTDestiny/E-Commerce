@@ -4,7 +4,6 @@ export const NAV_ITEMS = [
   { label: "Giỏ hàng", href: "/cart", icon: "ShoppingCart" },
   { label: "Đơn hàng", href: "/orders", icon: "ReceiptText" },
   { label: "Hồ sơ", href: "/profile", icon: "UserRound" },
-  { label: "Dashboard", href: "/dashboard", icon: "Activity" },
 ] as const;
 
 export const SERVICES = [

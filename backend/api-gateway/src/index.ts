@@ -270,8 +270,8 @@ async function main() {
 
   const sensitiveAuthLimiter = rateLimit({
     store: createRedisStore("rl:gateway:auth:"),
-    windowMs: 15 * 60 * 1000,
-    max: 20,
+    windowMs: config.gateway.rateLimit.authWindowMs,
+    max: config.gateway.rateLimit.authMax,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
@@ -282,13 +282,25 @@ async function main() {
 
   const paymentLimiter = rateLimit({
     store: createRedisStore("rl:gateway:payment:"),
-    windowMs: 60 * 1000,
-    max: 30,
+    windowMs: config.gateway.rateLimit.paymentWindowMs,
+    max: config.gateway.rateLimit.paymentMax,
     standardHeaders: true,
     legacyHeaders: false,
     message: {
       error: "Too many payment requests. Please slow down.",
       code: "PAYMENT_RATE_LIMIT_EXCEEDED",
+    },
+  });
+
+  const aiLimiter = rateLimit({
+    store: createRedisStore("rl:gateway:ai:"),
+    windowMs: config.gateway.rateLimit.aiWindowMs,
+    max: config.gateway.rateLimit.aiMax,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: "Too many AI requests. Please slow down.",
+      code: "AI_RATE_LIMIT_EXCEEDED",
     },
   });
 
@@ -326,6 +338,12 @@ async function main() {
 
       return paymentLimiter(req, res, next);
     },
+  );
+
+  app.use(
+    "/api/ai",
+    (req: Request, res: ExpressResponse, next: NextFunction) =>
+      aiLimiter(req, res, next),
   );
 
   function gatewayAuthMiddleware(req: Request, res: ExpressResponse, next: NextFunction) {

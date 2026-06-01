@@ -48,6 +48,7 @@ import {
 } from "@/lib/cart";
 
 const CHECKOUT_COOLDOWN_MS = 3000;
+const PAID_ORDER_STATUSES = ["CONFIRMED", "PROCESSING", "COMPLETED"];
 type SepayIntentResponse = Awaited<ReturnType<typeof paymentsApi.sepayIntent>>;
 
 const DEFAULT_ADDRESS = {
@@ -142,6 +143,20 @@ export default function CartPage() {
     writeCart(next);
   }
 
+  async function waitForPaidOrder(orderId: string) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const order = await ordersApi.get(orderId);
+      if (PAID_ORDER_STATUSES.includes(order.status)) {
+        setCreatedOrder(order);
+        return order;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+
+    return null;
+  }
+
   async function handleSimulatePayment(status: "SUCCESS" | "FAILED") {
     if (!sepayIntentData?.payment?.id) return;
     setSimulatingPayment(status);
@@ -154,11 +169,23 @@ export default function CartPage() {
       });
 
       if (response && response.ok) {
-        setSimulationStatusMessage(
-          status === "SUCCESS"
-            ? "✅ Giả lập thanh toán THÀNH CÔNG! Trạng thái đơn hàng đang được cập nhật."
-            : "❌ Giả lập thanh toán THẤT BẠI! Đơn hàng đã bị hủy."
-        );
+        if (status === "SUCCESS") {
+          setSimulationStatusMessage("Thanh toán thành công. Đang cập nhật đơn hàng...");
+          const paidOrder = await waitForPaidOrder(sepayIntentData.payment.orderId);
+
+          if (paidOrder) {
+            setSimulationStatusMessage("Đơn hàng đã được xác nhận. Đang chuyển đến lịch sử đơn hàng...");
+            setTimeout(() => {
+              setShowPaymentModal(false);
+              router.push("/orders");
+            }, 1200);
+          } else {
+            setSimulationStatusMessage("Thanh toán đã được ghi nhận. Hệ thống đang tiếp tục đồng bộ trạng thái đơn hàng.");
+          }
+        } else {
+          setSimulationStatusMessage("Thanh toán thất bại. Đơn hàng đã bị hủy.");
+        }
+        return;
       } else {
         throw new Error("Không nhận được phản hồi thành công từ simulator");
       }
@@ -523,6 +550,19 @@ export default function CartPage() {
                   >
                     Đóng
                   </Button>
+                  {sepayIntentData?.payment && (
+                    <Button
+                      onClick={() => handleSimulatePayment("SUCCESS")}
+                      disabled={simulatingPayment !== null}
+                    >
+                      {simulatingPayment === "SUCCESS" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      Tôi đã thanh toán
+                    </Button>
+                  )}
                   <Button asChild>
                     <Link href="/orders">
                       Xem Lịch sử đơn hàng →

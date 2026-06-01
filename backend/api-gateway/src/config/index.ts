@@ -41,6 +41,11 @@ export const config = {
         10,
       ),
       generalMax: parseInt(process.env.RATE_LIMIT_MAX || "120", 10),
+      authWindowMs: parseInt(
+        process.env.AUTH_RATE_LIMIT_WINDOW_MS || "900000",
+        10,
+      ),
+      authMax: parseInt(process.env.AUTH_RATE_LIMIT_MAX || "20", 10),
       createOrderWindowMs: parseInt(
         process.env.ORDER_RATE_LIMIT_WINDOW_MS || "60000",
         10,
@@ -49,6 +54,16 @@ export const config = {
         process.env.ORDER_RATE_LIMIT_MAX || "10",
         10,
       ),
+      paymentWindowMs: parseInt(
+        process.env.PAYMENT_RATE_LIMIT_WINDOW_MS || "60000",
+        10,
+      ),
+      paymentMax: parseInt(process.env.PAYMENT_RATE_LIMIT_MAX || "30", 10),
+      aiWindowMs: parseInt(
+        process.env.AI_RATE_LIMIT_WINDOW_MS || "60000",
+        10,
+      ),
+      aiMax: parseInt(process.env.AI_RATE_LIMIT_MAX || "20", 10),
     },
   },
   cors: {

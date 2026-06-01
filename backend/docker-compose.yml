@@ -1,6 +1,10 @@
+x-watchdog-labels: &watchdog-labels
+  com.techsphere.watchdog: "true"
+
 services:
   redis:
     image: redis:7-alpine
+    labels: *watchdog-labels
     ports:
       - "6379:6379"
     volumes:
@@ -14,6 +18,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    labels: *watchdog-labels
     ports:
       - "5433:5432"
     environment:
@@ -32,12 +37,14 @@ services:
 
   zookeeper:
     image: zookeeper:latest
+    labels: *watchdog-labels
     ports:
       - "2181:2181"
     restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.3.0
+    labels: *watchdog-labels
     ports:
       - "9092:9092"
       - "29092:29092"
@@ -57,6 +64,7 @@ services:
     build:
       context: .
       dockerfile: auth-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4006:4006"
     env_file:
@@ -95,6 +103,7 @@ services:
     build:
       context: .
       dockerfile: api-gateway/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4000:4000"
     environment:
@@ -116,12 +125,18 @@ services:
       HEALTH_RETRY_DELAYS_MS: 3000,5000
       RATE_LIMIT_WINDOW_MS: 60000
       RATE_LIMIT_MAX: 120
+      AUTH_RATE_LIMIT_WINDOW_MS: 900000
+      AUTH_RATE_LIMIT_MAX: 20
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: api-gateway
       KAFKA_MAX_RETRIES: 5
       KAFKA_RETRY_BASE_MS: 500
       ORDER_RATE_LIMIT_WINDOW_MS: 60000
       ORDER_RATE_LIMIT_MAX: 10
+      PAYMENT_RATE_LIMIT_WINDOW_MS: 60000
+      PAYMENT_RATE_LIMIT_MAX: 30
+      AI_RATE_LIMIT_WINDOW_MS: 60000
+      AI_RATE_LIMIT_MAX: 20
     restart: unless-stopped
     depends_on:
       redis:
@@ -145,6 +160,7 @@ services:
     build:
       context: .
       dockerfile: order-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4001:4001"
     environment:
@@ -179,6 +195,7 @@ services:
     build:
       context: .
       dockerfile: payment-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4002:4002"
     env_file:
@@ -215,6 +232,7 @@ services:
     build:
       context: .
       dockerfile: inventory-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4003:4003"
     environment:
@@ -249,6 +267,7 @@ services:
     build:
       context: .
       dockerfile: shipping-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4004:4004"
     environment:
@@ -283,6 +302,7 @@ services:
     build:
       context: .
       dockerfile: notification-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4005:4005"
     environment:
@@ -317,6 +337,7 @@ services:
     build:
       context: .
       dockerfile: ai-service/Dockerfile
+    labels: *watchdog-labels
     ports:
       - "4007:4007"
     env_file:
@@ -347,6 +368,7 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+    labels: *watchdog-labels
     ports:
       - "3000:3000"
     environment:
@@ -374,6 +396,20 @@ services:
       retries: 3
       start_period: 30s
 
+  watchdog:
+    build:
+      context: ../ops/docker-watchdog
+    environment:
+      WATCHDOG_LABEL: com.techsphere.watchdog=true
+      WATCHDOG_INTERVAL_SECONDS: 30
+      WATCHDOG_WINDOW_SECONDS: 1800
+      WATCHDOG_MAX_RESTARTS: 3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - watchdog-state:/state
+    restart: unless-stopped
+
 volumes:
   redis-data:
   postgres-data:
+  watchdog-state:
