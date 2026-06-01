@@ -108,7 +108,7 @@ services:
     environment:
       PORT: 4000
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001,http://47.129.201.126:3000
       AUTH_SERVICE_URL: http://auth-service:4006
       ORDER_SERVICE_URL: http://order-service:4001
       PAYMENT_SERVICE_URL: http://payment-service:4002
@@ -348,6 +348,8 @@ services:
     environment:
       NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://localhost:4000
+      # Public API URL for access from browser on EC2
+      NEXT_PUBLIC_API_URL_HOST: http://47.129.201.126:4000
     command: npm run dev -- --hostname 0.0.0.0 --port 3000 --webpack
     volumes:
       - ./frontend:/app
