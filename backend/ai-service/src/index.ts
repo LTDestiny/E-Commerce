@@ -3,7 +3,7 @@
 // ==========================================
 
 import express, { Request, Response } from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import Redis from "ioredis";
 import { GoogleGenAI } from "@google/genai";
 import { config } from "./config";
@@ -12,8 +12,25 @@ import { config } from "./config";
 const redisClient = new Redis(config.redis.url);
 const aiClient = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
+redisClient.on("error", (err) => {
+  console.error("[AIService] Redis client error:", err);
+});
+
 const app = express();
-app.use(cors({ origin: config.cors.origin }));
+const allowedOrigins = new Set(config.cors.allowedOrigins);
+const corsOptions: CorsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`Origin ${origin} is not allowed by CORS`));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Khai báo kiểu hội thoại lưu trữ trong Redis
