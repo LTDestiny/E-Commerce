@@ -28,7 +28,7 @@ function toOrder(row: OrderRow): Order {
 class OrderRepository {
   async create(request: CreateOrderRequest): Promise<Order> {
     const totalAmount = request.items.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
+      (sum: number, item: any) => sum + item.unitPrice * item.quantity,
       0,
     );
 

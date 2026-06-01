@@ -3,6 +3,7 @@
 // ==========================================
 
 import { v4 as uuidv4 } from "uuid";
+import Redis from "ioredis";
 
 /**
  * Generate unique ID
@@ -68,6 +69,93 @@ export class IdempotencyStore {
 
   async getResult(key: string): Promise<unknown | null> {
     return this.processedKeys.get(key)?.result ?? null;
+  }
+}
+
+/**
+ * Redis-backed Idempotency Store
+ * Stores the result as JSON under a key with TTL (milliseconds)
+ */
+
+export class RedisIdempotencyStore {
+  private redis: Redis;
+  private defaultTtlMs: number;
+
+  constructor(redisUrl: string, defaultTtlMs = 60_000 * 5) {
+    this.redis = new Redis(redisUrl);
+    this.defaultTtlMs = defaultTtlMs;
+  }
+
+  async check(key: string): Promise<boolean> {
+    const exists = await this.redis.exists(key);
+    return exists === 1;
+  }
+
+  async store(key: string, result: unknown, ttlMs?: number): Promise<void> {
+    const value = JSON.stringify({
+      result,
+      storedAt: new Date().toISOString(),
+    });
+    const ttl = Math.ceil((ttlMs ?? this.defaultTtlMs) / 1000);
+    await this.redis.set(key, value, "EX", ttl);
+  }
+
+  async getResult(key: string): Promise<unknown | null> {
+    const raw = await this.redis.get(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed.result ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+export class RedisSagaStore {
+  private redis: Redis;
+  private defaultTtlMs: number;
+  private prefix: string;
+
+  constructor(
+    redisUrl: string,
+    prefix = "saga:",
+    defaultTtlMs = 60 * 60 * 1000,
+  ) {
+    this.redis = new Redis(redisUrl);
+    this.prefix = prefix;
+    this.defaultTtlMs = defaultTtlMs;
+  }
+
+  private key(orderId: string): string {
+    return `${this.prefix}${orderId}`;
+  }
+
+  async get<T = unknown>(orderId: string): Promise<T | null> {
+    const raw = await this.redis.get(this.key(orderId));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async set(orderId: string, value: unknown, ttlMs?: number): Promise<void> {
+    const ttl = Math.ceil((ttlMs ?? this.defaultTtlMs) / 1000);
+    await this.redis.set(this.key(orderId), JSON.stringify(value), "EX", ttl);
+  }
+
+  async delete(orderId: string): Promise<void> {
+    await this.redis.del(this.key(orderId));
+  }
+
+  async disconnect(): Promise<void> {
+    await this.redis.quit();
   }
 }
 

@@ -22,6 +22,15 @@ export {
   sleep,
   retryWithBackoff,
   IdempotencyStore,
+  RedisIdempotencyStore,
   CircuitBreaker,
   CircuitState,
 } from "./utils";
+
+export { createIdempotencyMiddleware } from "./utils/idempotency-middleware";
+
+// Kafka
+export { KafkaClient } from "./kafka/client";
+export { KafkaEventBus } from "./events/event-bus";
+export { produceMessage } from "./kafka/producer";
+export { checkKafkaConnectivity } from "./kafka/health";

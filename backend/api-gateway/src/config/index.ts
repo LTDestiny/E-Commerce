@@ -8,6 +8,35 @@ export const config = {
   redis: {
     url: process.env.REDIS_URL || "redis://localhost:6379",
   },
+  gateway: {
+    proxyTimeoutMs: parseInt(process.env.PROXY_TIMEOUT_MS || "5000", 10),
+    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || "10000", 10),
+    circuitFailureThreshold: parseInt(
+      process.env.CIRCUIT_FAILURE_THRESHOLD || "3",
+      10,
+    ),
+    circuitOpenMs: parseInt(process.env.CIRCUIT_OPEN_MS || "15000", 10),
+    healthTimeoutMs: parseInt(process.env.HEALTH_TIMEOUT_MS || "2000", 10),
+    healthRetryDelaysMs: (process.env.HEALTH_RETRY_DELAYS_MS || "3000,5000")
+      .split(",")
+      .map((value) => parseInt(value.trim(), 10))
+      .filter((value) => Number.isFinite(value) && value >= 0),
+    rateLimit: {
+      generalWindowMs: parseInt(
+        process.env.RATE_LIMIT_WINDOW_MS || "60000",
+        10,
+      ),
+      generalMax: parseInt(process.env.RATE_LIMIT_MAX || "120", 10),
+      createOrderWindowMs: parseInt(
+        process.env.ORDER_RATE_LIMIT_WINDOW_MS || "60000",
+        10,
+      ),
+      createOrderMax: parseInt(
+        process.env.ORDER_RATE_LIMIT_MAX || "10",
+        10,
+      ),
+    },
+  },
   cors: {
     origin: process.env.CORS_ORIGIN || "http://localhost:3000",
   },

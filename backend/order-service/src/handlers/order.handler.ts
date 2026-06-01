@@ -14,20 +14,33 @@ import {
   createEvent,
   OrderConfirmedEvent,
   OrderCancelledEvent,
+  IdempotencyStore,
+  RedisIdempotencyStore,
+  RedisSagaStore,
 } from "@ecommerce/shared";
 import { orderRepository } from "../models/order.repository";
 import { config } from "../config";
 
+type SagaState = {
+  stockReserved: boolean;
+  paymentProcessed: boolean;
+  updatedAt: string;
+};
+
 // Track saga state per order
-const sagaState = new Map<
-  string,
-  { stockReserved: boolean; paymentProcessed: boolean }
->();
+const sagaState = new Map<string, SagaState>();
+
+const sagaStore = process.env.REDIS_URL
+  ? new RedisSagaStore(process.env.REDIS_URL, "saga:order:")
+  : null;
 
 export function registerEventHandlers(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): void {
+  const idempotencyStore = process.env.REDIS_URL
+    ? new RedisIdempotencyStore(process.env.REDIS_URL)
+    : new IdempotencyStore();
   // ----- Listen: Stock Reserved -----
   eventBus.subscribe(
     EVENT_CHANNELS.STOCK_RESERVED,
@@ -35,24 +48,50 @@ export function registerEventHandlers(
       if (event.type !== "STOCK_RESERVED") return;
       await eventStore.append(event);
 
-      const { orderId } = event.payload;
-      const state = sagaState.get(orderId) || {
-        stockReserved: false,
-        paymentProcessed: false,
-      };
-      state.stockReserved = true;
-      sagaState.set(orderId, state);
+      try {
+        const { orderId } = event.payload;
 
-      await orderRepository.updateStatus(
-        orderId,
-        OrderStatus.INVENTORY_RESERVED,
-      );
-      console.log(
-        `[${config.serviceName}] Stock reserved for order ${orderId}`,
-      );
+        const idempotencyKey = `order-saga-${orderId}-STOCK_RESERVED`;
+        if (await idempotencyStore.check(idempotencyKey)) {
+          console.log(
+            `[${config.serviceName}] Duplicate STOCK_RESERVED for ${orderId} - skipped`,
+          );
+          return;
+        }
 
-      // Check if both conditions met → Confirm order
-      await tryConfirmOrder(orderId, event.correlationId, eventBus, eventStore);
+        const state =
+          (await sagaStore?.get<SagaState>(orderId)) ||
+          sagaState.get(orderId) || {
+            stockReserved: false,
+            paymentProcessed: false,
+            updatedAt: new Date().toISOString(),
+          };
+        state.stockReserved = true;
+        state.updatedAt = new Date().toISOString();
+        sagaState.set(orderId, state);
+        await sagaStore?.set(orderId, state);
+
+        await orderRepository.updateStatus(
+          orderId,
+          OrderStatus.INVENTORY_RESERVED,
+        );
+        console.log(
+          `[${config.serviceName}] Stock reserved for order ${orderId}`,
+        );
+
+        // Check if both conditions met → Confirm order
+        await tryConfirmOrder(
+          orderId,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
+
+        await idempotencyStore.store(idempotencyKey, { processed: true });
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -63,24 +102,50 @@ export function registerEventHandlers(
       if (event.type !== "PAYMENT_PROCESSED") return;
       await eventStore.append(event);
 
-      const { orderId } = event.payload;
-      const state = sagaState.get(orderId) || {
-        stockReserved: false,
-        paymentProcessed: false,
-      };
-      state.paymentProcessed = true;
-      sagaState.set(orderId, state);
+      try {
+        const { orderId } = event.payload;
 
-      await orderRepository.updateStatus(
-        orderId,
-        OrderStatus.PAYMENT_COMPLETED,
-      );
-      console.log(
-        `[${config.serviceName}] Payment processed for order ${orderId}`,
-      );
+        const idempotencyKey = `order-saga-${orderId}-PAYMENT_PROCESSED`;
+        if (await idempotencyStore.check(idempotencyKey)) {
+          console.log(
+            `[${config.serviceName}] Duplicate PAYMENT_PROCESSED for ${orderId} - skipped`,
+          );
+          return;
+        }
 
-      // Check if both conditions met → Confirm order
-      await tryConfirmOrder(orderId, event.correlationId, eventBus, eventStore);
+        const state =
+          (await sagaStore?.get<SagaState>(orderId)) ||
+          sagaState.get(orderId) || {
+            stockReserved: false,
+            paymentProcessed: false,
+            updatedAt: new Date().toISOString(),
+          };
+        state.paymentProcessed = true;
+        state.updatedAt = new Date().toISOString();
+        sagaState.set(orderId, state);
+        await sagaStore?.set(orderId, state);
+
+        await orderRepository.updateStatus(
+          orderId,
+          OrderStatus.PAYMENT_COMPLETED,
+        );
+        console.log(
+          `[${config.serviceName}] Payment processed for order ${orderId}`,
+        );
+
+        // Check if both conditions met → Confirm order
+        await tryConfirmOrder(
+          orderId,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
+
+        await idempotencyStore.store(idempotencyKey, { processed: true });
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -91,14 +156,19 @@ export function registerEventHandlers(
       if (event.type !== "STOCK_RESERVATION_FAILED") return;
       await eventStore.append(event);
 
-      const { orderId, reason } = event.payload;
-      await cancelOrder(
-        orderId,
-        reason,
-        event.correlationId,
-        eventBus,
-        eventStore,
-      );
+      try {
+        const { orderId, reason } = event.payload;
+        await cancelOrder(
+          orderId,
+          reason,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -109,14 +179,19 @@ export function registerEventHandlers(
       if (event.type !== "PAYMENT_FAILED") return;
       await eventStore.append(event);
 
-      const { orderId, reason } = event.payload;
-      await cancelOrder(
-        orderId,
-        `Payment failed: ${reason}`,
-        event.correlationId,
-        eventBus,
-        eventStore,
-      );
+      try {
+        const { orderId, reason } = event.payload;
+        await cancelOrder(
+          orderId,
+          `Payment failed: ${reason}`,
+          event.correlationId,
+          eventBus,
+          eventStore,
+        );
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -127,11 +202,16 @@ export function registerEventHandlers(
       if (event.type !== "SHIPPING_SCHEDULED") return;
       await eventStore.append(event);
 
-      const { orderId } = event.payload;
-      await orderRepository.updateStatus(
-        orderId,
-        OrderStatus.SHIPPING_SCHEDULED,
-      );
+      try {
+        const { orderId } = event.payload;
+        await orderRepository.updateStatus(
+          orderId,
+          OrderStatus.SHIPPING_SCHEDULED,
+        );
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -142,8 +222,13 @@ export function registerEventHandlers(
       if (event.type !== "ORDER_SHIPPED") return;
       await eventStore.append(event);
 
-      const { orderId } = event.payload;
-      await orderRepository.updateStatus(orderId, OrderStatus.SHIPPED);
+      try {
+        const { orderId } = event.payload;
+        await orderRepository.updateStatus(orderId, OrderStatus.SHIPPED);
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -154,8 +239,13 @@ export function registerEventHandlers(
       if (event.type !== "ORDER_DELIVERED") return;
       await eventStore.append(event);
 
-      const { orderId } = event.payload;
-      await orderRepository.updateStatus(orderId, OrderStatus.DELIVERED);
+      try {
+        const { orderId } = event.payload;
+        await orderRepository.updateStatus(orderId, OrderStatus.DELIVERED);
+      } catch (err) {
+        console.error(`[${config.serviceName}] Order handler error:`, err);
+        throw err;
+      }
     },
   );
 
@@ -188,6 +278,8 @@ async function tryConfirmOrder(
   await eventStore.append(event);
   await eventBus.publish(EVENT_CHANNELS.ORDER_CONFIRMED, event);
   sagaState.delete(orderId);
+  await sagaStore?.delete(orderId);
+  await sagaStore?.delete(orderId);
 
   console.log(`[${config.serviceName}] ✅ Order ${orderId} CONFIRMED`);
 }
