@@ -6,7 +6,14 @@ import { ShieldCheck, LogIn, UserPlus, Mail, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { authApi, clearAuthSession, getStoredUser, saveAuthSession } from "@/lib/api";
+import {
+  authApi,
+  clearAuthSession,
+  getStoredUser,
+  resolvePostLoginPath,
+  saveAuthSession,
+  syncClientAuthState,
+} from "@/lib/api";
 
 export default function AuthPage() {
   return (
@@ -19,7 +26,7 @@ export default function AuthPage() {
 function AuthContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/";
+  const next = params.get("next");
   
   const [mode, setMode] = useState<"login" | "register" | "forgot" | "reset">("login");
   const [name, setName] = useState("");
@@ -32,14 +39,21 @@ function AuthContent() {
   const [currentUser, setCurrentUser] = useState<ReturnType<typeof getStoredUser>>(null);
 
   useEffect(() => {
-    setCurrentUser(getStoredUser());
-  }, []);
+    const syncedUser = syncClientAuthState();
+
+    if (next?.startsWith("/admin") && syncedUser && syncedUser.role !== "ADMIN") {
+      clearAuthSession();
+      setCurrentUser(null);
+      setMessage("Tai khoan hien tai khong co quyen admin. Vui long dang nhap bang tai khoan quan tri.");
+      return;
+    }
+
+    setCurrentUser(syncedUser);
+  }, [next]);
 
   useEffect(() => {
     if (currentUser) {
       setMessage(`Đã đăng nhập: ${currentUser.email}`);
-    } else {
-      setMessage(null);
     }
   }, [currentUser]);
 
@@ -61,13 +75,13 @@ function AuthContent() {
         const payload = await authApi.register({ name, email, password });
         saveAuthSession(payload, { mergeGuestCart: true });
         setCurrentUser(getStoredUser());
-        router.push(next);
+        router.replace(resolvePostLoginPath(payload.user, next));
         router.refresh();
       } else if (mode === "login") {
         const payload = await authApi.login({ email, password });
         saveAuthSession(payload, { mergeGuestCart: true });
         setCurrentUser(getStoredUser());
-        router.push(next);
+        router.replace(resolvePostLoginPath(payload.user, next));
         router.refresh();
       } else if (mode === "forgot") {
         const response = await authApi.forgotPassword(email);
@@ -200,3 +214,4 @@ function AuthContent() {
     </div>
   );
 }
+

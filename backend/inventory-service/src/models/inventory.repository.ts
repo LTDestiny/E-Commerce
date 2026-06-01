@@ -82,6 +82,48 @@ class InventoryRepository {
         availableStock: 9999,
         lowStockThreshold: 1,
       },
+      {
+        productId: "SKU-7822-X",
+        productName: "Neural Engine Core v2",
+        totalStock: 450,
+        availableStock: 408,
+        lowStockThreshold: 50,
+      },
+      {
+        productId: "SKU-9901-B",
+        productName: "Quantum Cooling Fan",
+        totalStock: 18,
+        availableStock: 15,
+        lowStockThreshold: 20,
+      },
+      {
+        productId: "SKU-1022-L",
+        productName: "High-Density SSD 4TB",
+        totalStock: 0,
+        availableStock: 0,
+        lowStockThreshold: 10,
+      },
+      {
+        productId: "SKU-5541-M",
+        productName: "Fiber Optic Switch 48p",
+        totalStock: 1200,
+        availableStock: 1050,
+        lowStockThreshold: 100,
+      },
+      {
+        productId: "SKU-2930",
+        productName: "Titan CPU Cooler v4",
+        totalStock: 14,
+        availableStock: 2,
+        lowStockThreshold: 12,
+      },
+      {
+        productId: "SKU-1122",
+        productName: "10m Optic Fiber Cable",
+        totalStock: 38,
+        availableStock: 5,
+        lowStockThreshold: 15,
+      },
     ];
 
     for (const p of products) {

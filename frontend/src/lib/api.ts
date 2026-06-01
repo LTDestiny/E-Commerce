@@ -11,6 +11,8 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 const TOKEN_KEY = "techsphere_auth_token";
 const USER_KEY = "techsphere_auth_user";
+const ROLE_COOKIE_KEY = "auth_role";
+const TOKEN_COOKIE_KEY = "auth_token";
 
 export type AuthUser = {
   id: string;
@@ -27,6 +29,68 @@ export type AuthResponse = {
 type SaveAuthSessionOptions = {
   mergeGuestCart?: boolean;
 };
+
+function writeCookie(name: string, value: string, maxAgeSeconds: number) {
+  if (typeof document === "undefined") return;
+
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax${secure}`;
+}
+
+function clearCookie(name: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+}
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") return null;
+
+  const prefix = `${name}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix));
+
+  if (!entry) return null;
+  return decodeURIComponent(entry.slice(prefix.length));
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decoded = window.atob(normalized);
+    return JSON.parse(decoded) as Partial<AuthUser>;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNextPath(next?: string | null) {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return null;
+  return next;
+}
+
+export function getDefaultRouteForRole(user: AuthUser) {
+  return user.role === "ADMIN" ? "/admin" : "/";
+}
+
+export function resolvePostLoginPath(user: AuthUser, next?: string | null) {
+  const normalizedNext = normalizeNextPath(next);
+
+  if (user.role === "ADMIN") {
+    return normalizedNext && normalizedNext.startsWith("/admin")
+      ? normalizedNext
+      : getDefaultRouteForRole(user);
+  }
+
+  if (!normalizedNext || normalizedNext === "/auth" || normalizedNext.startsWith("/admin")) {
+    return getDefaultRouteForRole(user);
+  }
+
+  return normalizedNext;
+}
 
 export function getStoredToken() {
   if (typeof window === "undefined") return null;
@@ -54,8 +118,8 @@ export function saveAuthSession(
   }
   window.localStorage.setItem(TOKEN_KEY, auth.accessToken);
   window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
-  // Set cookie for Next.js Middleware route guarding
-  document.cookie = `auth_token=${auth.accessToken}; path=/; max-age=2592000; SameSite=Lax; Secure=${window.location.protocol === 'https:'}`;
+  writeCookie(TOKEN_COOKIE_KEY, auth.accessToken, 60 * 60 * 24 * 30);
+  writeCookie(ROLE_COOKIE_KEY, auth.user.role, 60 * 60 * 24 * 30);
   window.dispatchEvent(new Event("auth-changed"));
   window.dispatchEvent(new Event(CART_UPDATED_EVENT));
 }
@@ -65,10 +129,49 @@ export function clearAuthSession() {
   clearGuestCart();
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
-  // Clear cookie
-  document.cookie = "auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  clearCookie(TOKEN_COOKIE_KEY);
+  clearCookie(ROLE_COOKIE_KEY);
   window.dispatchEvent(new Event("auth-changed"));
   window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+}
+
+export function syncClientAuthState() {
+  if (typeof window === "undefined") return null;
+
+  const storedToken = window.localStorage.getItem(TOKEN_KEY);
+  const storedUser = getStoredUser();
+  const cookieToken = readCookie(TOKEN_COOKIE_KEY);
+  const cookieRole = readCookie(ROLE_COOKIE_KEY);
+
+  const hasCookieSession = Boolean(cookieToken && cookieRole);
+  const hasStoredSession = Boolean(storedToken && storedUser);
+
+  if (!hasCookieSession && hasStoredSession) {
+    clearAuthSession();
+    return null;
+  }
+
+  if (hasCookieSession && !hasStoredSession && cookieToken) {
+    const payload = decodeJwtPayload(cookieToken);
+    if (payload?.id && payload?.email && payload?.name && payload?.role) {
+      const restoredUser: AuthUser = {
+        id: payload.id,
+        email: payload.email,
+        name: payload.name,
+        role: payload.role,
+      };
+      window.localStorage.setItem(TOKEN_KEY, cookieToken);
+      window.localStorage.setItem(USER_KEY, JSON.stringify(restoredUser));
+      return restoredUser;
+    }
+  }
+
+  if (storedUser && cookieRole && storedUser.role !== cookieRole) {
+    clearAuthSession();
+    return null;
+  }
+
+  return storedUser;
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -150,11 +253,13 @@ export interface ShippingAddress {
 
 export interface Order {
   id: string;
+  orderCode?: string;
   customerId: string;
   items: OrderItem[];
   totalAmount: number;
   shippingAddress: ShippingAddress;
   status: string;
+  paymentMethod?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -173,6 +278,11 @@ export const ordersApi = {
     }),
   list: (all?: boolean) => fetchApi<Order[]>(`/api/orders${all ? "?all=true" : ""}`),
   get: (id: string) => fetchApi<Order>(`/api/orders/${id}`),
+  updateStatus: (id: string, status: string, reason?: string) =>
+    fetchApi<Order>(`/api/orders/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, reason }),
+    }),
   getEvents: (id: string) => fetchApi<StoredEvent[]>(`/api/orders/${id}/events`),
   getStats: () => fetchApi<OrderStats>("/api/orders/stats"),
 };
@@ -210,12 +320,20 @@ export interface Payment {
   method: string;
   status: string;
   transactionId?: string;
+  provider?: string;
+  paidAt?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export const paymentsApi = {
   list: () => fetchApi<Payment[]>("/api/payments"),
+  get: (id: string) => fetchApi<Payment>(`/api/payments/${id}`),
+  updateStatus: (id: string, payload: { status: string; reason?: string; transactionId?: string }) =>
+    fetchApi<Payment>(`/api/payments/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   getByOrder: (orderId: string) => fetchApi<Payment>(`/api/payments/order/${orderId}`),
   sepayIntent: (payload: { orderId: string; customerId: string; amount: number }) =>
     fetchApi<{
@@ -238,7 +356,7 @@ export const paymentsApi = {
       body: JSON.stringify(payload),
     }),
   sepaySimulate: (payload: { paymentId: string; status: "SUCCESS" | "FAILED" }) =>
-    fetchApi<{ ok: boolean; result: any }>("/api/payments/sepay/simulate", {
+    fetchApi<{ ok: boolean; result: unknown }>("/api/payments/sepay/simulate", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -252,12 +370,20 @@ export interface Shipment {
   trackingNumber?: string;
   status: string;
   estimatedDelivery?: string;
+  actualDelivery?: string;
+  shippingAddress?: ShippingAddress;
   createdAt: string;
   updatedAt: string;
 }
 
 export const shipmentsApi = {
   list: () => fetchApi<Shipment[]>("/api/shipments"),
+  get: (id: string) => fetchApi<Shipment>(`/api/shipments/${id}`),
+  updateStatus: (id: string, payload: { status: string; reason?: string; trackingNumber?: string }) =>
+    fetchApi<Shipment>(`/api/shipments/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   getByOrder: (orderId: string) => fetchApi<Shipment>(`/api/shipments/order/${orderId}`),
 };
 
@@ -277,8 +403,44 @@ export interface NotificationItem {
 
 export const notificationsApi = {
   list: () => fetchApi<NotificationItem[]>("/api/notifications"),
+  get: (id: string) => fetchApi<NotificationItem>(`/api/notifications/${id}`),
   getByOrder: (orderId: string) => fetchApi<NotificationItem[]>(`/api/notifications/order/${orderId}`),
   read: (id: string) => fetchApi<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+  updateStatus: (id: string, payload: { status: string; reason?: string }) =>
+    fetchApi<NotificationItem>(`/api/notifications/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  resend: (id: string) =>
+    fetchApi<{ ok: boolean; notification: NotificationItem }>(`/api/notifications/${id}/resend`, {
+      method: "POST",
+    }),
+};
+
+// ----- Admin Users -----
+export interface AdminUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const usersApi = {
+  list: () => fetchApi<AdminUserRecord[]>("/api/users"),
+  get: (id: string) => fetchApi<AdminUserRecord>(`/api/users/${id}`),
+  updateRole: (id: string, role: "USER" | "ADMIN") =>
+    fetchApi<AdminUserRecord>(`/api/users/${id}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  updateStatus: (id: string, payload: { status: string; reason?: string }) =>
+    fetchApi<AdminUserRecord>(`/api/users/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ----- Health -----

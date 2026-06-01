@@ -34,6 +34,7 @@ import {
   paymentsApi,
   type CreateOrderPayload,
   type InventoryItem,
+  type Order,
 } from "@/lib/api";
 import { createCustomerId, formatVND } from "@/lib/commerce";
 import {
@@ -47,6 +48,8 @@ import {
 } from "@/lib/cart";
 
 const CHECKOUT_COOLDOWN_MS = 3000;
+type SepayIntentResponse = Awaited<ReturnType<typeof paymentsApi.sepayIntent>>;
+
 const DEFAULT_ADDRESS = {
   fullName: "Nguyễn Văn A",
   phone: "0901234567",
@@ -70,8 +73,8 @@ export default function CartPage() {
 
   // States for interactive payment modal and VietQR
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [createdOrder, setCreatedOrder] = useState<any>(null);
-  const [sepayIntentData, setSepayIntentData] = useState<any>(null);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [sepayIntentData, setSepayIntentData] = useState<SepayIntentResponse | null>(null);
   const [simulatingPayment, setSimulatingPayment] = useState<"SUCCESS" | "FAILED" | null>(null);
   const [simulationStatusMessage, setSimulationStatusMessage] = useState<string | null>(null);
 
@@ -84,10 +87,9 @@ export default function CartPage() {
       try {
         const order = await ordersApi.get(createdOrder.id);
         if (
-          order.status === "PAID" ||
           order.status === "CONFIRMED" ||
-          order.status === "SHIPPING_SCHEDULED" ||
-          order.status === "SHIPPED"
+          order.status === "PROCESSING" ||
+          order.status === "COMPLETED"
         ) {
           clearInterval(interval);
           setSimulationStatusMessage("✅ Thanh toán thành công! Đơn hàng của bạn đã được ghi nhận.");
@@ -431,7 +433,7 @@ export default function CartPage() {
                   <div className="space-y-2">
                     <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Tóm tắt đơn hàng</h4>
                     <div className="max-h-[160px] overflow-y-auto space-y-2 rounded-lg border bg-muted/20 p-3">
-                      {createdOrder.items.map((item: any) => (
+                      {createdOrder.items.map((item) => (
                         <div key={item.productId} className="flex justify-between text-sm">
                           <span className="font-medium text-foreground max-w-[70%] truncate">
                             {item.productName} <span className="text-muted-foreground">x{item.quantity}</span>

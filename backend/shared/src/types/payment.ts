@@ -4,13 +4,10 @@
 
 export enum PaymentStatus {
   PENDING = "PENDING",
-  AUTHORIZED = "AUTHORIZED",
-  PROCESSING = "PROCESSING",
   COMPLETED = "COMPLETED",
   FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
   REFUNDED = "REFUNDED",
-  SUCCESS = "SUCCESS",
-  EXPIRED = "EXPIRED",
 }
 
 export enum PaymentMethod {

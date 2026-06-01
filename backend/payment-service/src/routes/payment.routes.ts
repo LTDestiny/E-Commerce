@@ -16,6 +16,16 @@ import {
 import { paymentRepository } from "../models/payment.repository";
 import { config } from "../config";
 
+function serviceHeaders(clientHeaders?: any): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!clientHeaders) return headers;
+  if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
+  if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
+  if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
+  if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
+  return headers;
+}
+
 async function fetchOrder(orderId: string, clientHeaders?: any): Promise<any> {
   const urls = [
     `http://ecommerce-order-service:4001/api/orders/${orderId}`,
@@ -23,13 +33,7 @@ async function fetchOrder(orderId: string, clientHeaders?: any): Promise<any> {
     `http://localhost:4001/api/orders/${orderId}`
   ];
 
-  const headers: Record<string, string> = {};
-  if (clientHeaders) {
-    if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
-    if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
-    if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
-    if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
-  }
+  const headers = serviceHeaders(clientHeaders);
 
   for (const url of urls) {
     try {
@@ -49,11 +53,122 @@ async function fetchOrder(orderId: string, clientHeaders?: any): Promise<any> {
   return null;
 }
 
+async function patchOrderStatus(orderId: string, status: string, reason: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-order-service:4001/api/orders/${orderId}/status`,
+    `http://order-service:4001/api/orders/${orderId}/status`,
+    `http://localhost:4001/api/orders/${orderId}/status`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          ...serviceHeaders(clientHeaders),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status, reason }),
+      });
+      if (res.ok) return await res.json();
+      console.warn(`[PaymentService sync] Order ${orderId} -> ${status} failed at ${url}: ${res.status} ${await res.text()}`);
+    } catch (error) {
+      console.warn(`[PaymentService sync] Order status connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function fetchShipmentByOrder(orderId: string): Promise<any> {
+  const urls = [
+    `http://ecommerce-shipping-service:4004/api/shipments/order/${orderId}`,
+    `http://shipping-service:4004/api/shipments/order/${orderId}`,
+    `http://localhost:4004/api/shipments/order/${orderId}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+      if (res.status !== 404) {
+        console.warn(`[PaymentService sync] Shipment lookup ${orderId} failed at ${url}: ${res.status} ${await res.text()}`);
+      }
+    } catch (error) {
+      console.warn(`[PaymentService sync] Shipment lookup connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function patchShipmentStatus(shipmentId: string, status: string, reason: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-shipping-service:4004/api/shipments/${shipmentId}/status`,
+    `http://shipping-service:4004/api/shipments/${shipmentId}/status`,
+    `http://localhost:4004/api/shipments/${shipmentId}/status`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          ...serviceHeaders(clientHeaders),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status, reason }),
+      });
+      if (res.ok) return await res.json();
+      console.warn(`[PaymentService sync] Shipment ${shipmentId} -> ${status} failed at ${url}: ${res.status} ${await res.text()}`);
+    } catch (error) {
+      console.warn(`[PaymentService sync] Shipment status connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function syncOperationalStatusAfterPayment(payment: any, status: string, reason: string, clientHeaders?: any) {
+  const normalized = status.toUpperCase();
+  if (normalized === "COMPLETED") {
+    await patchOrderStatus(payment.orderId, "CONFIRMED", reason || "Payment captured by admin", clientHeaders);
+    const shipment = await fetchShipmentByOrder(payment.orderId);
+    if (shipment && String(shipment.status || "").toUpperCase() === "PENDING") {
+      await patchShipmentStatus(shipment.id, "READY", "Payment completed, shipment released for processing", clientHeaders);
+    }
+    return;
+  }
+
+  const orderStatusByPaymentStatus: Record<string, string> = {
+    FAILED: "FAILED",
+    CANCELLED: "CANCELLED",
+    REFUNDED: "CANCELLED",
+  };
+  const targetOrderStatus = orderStatusByPaymentStatus[normalized];
+  if (!targetOrderStatus) return;
+
+  await patchOrderStatus(payment.orderId, targetOrderStatus, reason || `Payment ${normalized.toLowerCase()}`, clientHeaders);
+
+  const shipment = await fetchShipmentByOrder(payment.orderId);
+  const shipmentStatus = String(shipment?.status || "").toUpperCase();
+  if (shipment && ["PENDING", "READY"].includes(shipmentStatus) && normalized !== "REFUNDED") {
+    await patchShipmentStatus(shipment.id, normalized === "CANCELLED" ? "CANCELLED" : "FAILED", reason || `Payment ${normalized.toLowerCase()}`, clientHeaders);
+  }
+}
+
 export function createPaymentRoutes(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): Router {
   const router = Router();
+  const transitions: Record<string, string[]> = {
+    PENDING: ["COMPLETED", "FAILED", "CANCELLED"],
+    FAILED: ["PENDING", "CANCELLED"],
+    COMPLETED: ["REFUNDED"],
+    REFUNDED: [],
+    CANCELLED: [],
+  };
 
   // GET /api/payments - List all payments
   router.get("/", async (_req: Request, res: Response) => {
@@ -88,6 +203,74 @@ export function createPaymentRoutes(
         return;
       }
       res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/payments/:id/status - Admin status control
+  router.patch("/:id/status", async (req: Request, res: Response) => {
+    try {
+      if (String(req.headers["x-user-role"] || "") !== "ADMIN") {
+        res.status(403).json({ error: "Admin role is required" });
+        return;
+      }
+
+      const payment = await paymentRepository.findById(req.params.id);
+      if (!payment) {
+        res.status(404).json({ error: "Payment not found" });
+        return;
+      }
+
+      const requestedStatus = String(req.body?.status || "").toUpperCase();
+      const reason = String(req.body?.reason || "").trim();
+      if (!Object.values(PaymentStatus).includes(requestedStatus as PaymentStatus)) {
+        res.status(400).json({ error: "Invalid payment status" });
+        return;
+      }
+
+      const currentStatus = String(payment.status || "PENDING").toUpperCase();
+      if (currentStatus === requestedStatus) {
+        await syncOperationalStatusAfterPayment(
+          payment,
+          requestedStatus,
+          reason || `Payment ${requestedStatus.toLowerCase()} resync via admin status control`,
+          req.headers,
+        );
+        res.json(payment);
+        return;
+      }
+
+      if (!(transitions[currentStatus] || []).includes(requestedStatus)) {
+        res.status(409).json({ error: `Transition ${currentStatus} -> ${requestedStatus} is not allowed` });
+        return;
+      }
+
+      if (["FAILED", "CANCELLED", "REFUNDED"].includes(requestedStatus) && !reason) {
+        res.status(400).json({ error: "Reason is required for sensitive payment status changes" });
+        return;
+      }
+
+      const transactionId =
+        req.body?.transactionId ||
+        payment.transactionId ||
+        (requestedStatus === "COMPLETED" ? `ADMIN-${crypto.randomBytes(5).toString("hex").toUpperCase()}` : undefined);
+
+      const updated = await paymentRepository.updateStatus(
+        payment.id,
+        requestedStatus as PaymentStatus,
+        transactionId,
+        requestedStatus === "COMPLETED" ? new Date() : undefined,
+      );
+      if (updated) {
+        await syncOperationalStatusAfterPayment(
+          updated,
+          requestedStatus,
+          reason || `Payment ${requestedStatus.toLowerCase()} via admin status control`,
+          req.headers,
+        );
+      }
+      res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
@@ -163,9 +346,9 @@ export function createPaymentRoutes(
       }
 
       if (
-        order.status === "PAID" ||
         order.status === "CONFIRMED" ||
-        order.status === "PAYMENT_COMPLETED"
+        order.status === "PROCESSING" ||
+        order.status === "COMPLETED"
       ) {
         res.status(400).json({ error: "Order is already paid" });
         return;
@@ -278,12 +461,12 @@ export function createPaymentRoutes(
         return;
       }
 
-      if (payment.status === PaymentStatus.COMPLETED || payment.status === "SUCCESS") {
+      if (payment.status === PaymentStatus.COMPLETED) {
         res.json({ ok: true, message: "Duplicate callback - already completed", duplicated: true });
         return;
       }
 
-      if (status === "SUCCESS") {
+      if (status === "SUCCESS" || status === "COMPLETED") {
         if (amount < payment.amount) {
           res.status(400).json({ error: `Incorrect amount. Expected ${payment.amount}, received ${amount}` });
           return;

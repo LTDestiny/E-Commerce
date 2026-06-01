@@ -1,3 +1,17 @@
+function parseCorsOrigins(value?: string) {
+  const origins = (value || "http://localhost:3000,http://localhost:3001")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return {
+    allowedOrigins: origins,
+    primaryOrigin: origins[0] || "http://localhost:3000",
+  };
+}
+
+const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGIN);
+
 export const config = {
   port: parseInt(process.env.PORT || "4000", 10),
   serviceName: "APIGateway",
@@ -38,7 +52,8 @@ export const config = {
     },
   },
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    allowedOrigins: corsOrigins.allowedOrigins,
+    primaryOrigin: corsOrigins.primaryOrigin,
   },
   services: {
     auth: process.env.AUTH_SERVICE_URL || "http://localhost:4006",

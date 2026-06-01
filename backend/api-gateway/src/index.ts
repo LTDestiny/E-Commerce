@@ -3,7 +3,7 @@ import express, {
   Response as ExpressResponse,
   NextFunction,
 } from "express";
-import cors from "cors";
+import cors, { CorsOptions } from "cors";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import Redis from "ioredis";
 import rateLimit from "express-rate-limit";
@@ -167,6 +167,7 @@ async function checkServiceHealthWithRetry(service: {
       }
 
       const data = await response.json().catch(() => null);
+      recordServiceSuccess(service.name);
 
       return {
         ...service,
@@ -176,6 +177,7 @@ async function checkServiceHealthWithRetry(service: {
       };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Unknown error";
+      recordServiceFailure(service.name, error);
 
       if (attempt < SERVICE_HEALTH_RETRY_DELAYS_MS.length) {
         const retryDelay = SERVICE_HEALTH_RETRY_DELAYS_MS[attempt];
@@ -201,6 +203,18 @@ async function checkServiceHealthWithRetry(service: {
 
 async function main() {
   const app = express();
+  const allowedOrigins = new Set(config.cors.allowedOrigins);
+  const corsOptions: CorsOptions = {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+    credentials: true,
+  };
   const redisOptions = {
     maxRetriesPerRequest: 2,
     reconnectOnError: () => true,
@@ -216,7 +230,7 @@ async function main() {
         ),
     });
 
-  app.use(cors({ origin: config.cors.origin, credentials: true }));
+  app.use(cors(corsOptions));
 
   // ==========================================
   // Server-side Rate Limiter at API Gateway
@@ -397,11 +411,19 @@ async function main() {
   const sseClients: Set<ExpressResponse> = new Set();
 
   app.get("/api/events/stream", (req: Request, res: ExpressResponse) => {
+    const requestOrigin =
+      typeof req.headers.origin === "string" &&
+      allowedOrigins.has(req.headers.origin)
+        ? req.headers.origin
+        : config.cors.primaryOrigin;
+
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "Access-Control-Allow-Origin": config.cors.origin,
+      "Access-Control-Allow-Origin": requestOrigin,
+      "Access-Control-Allow-Credentials": "true",
+      Vary: "Origin",
     });
     res.write(": heartbeat\n\n");
 

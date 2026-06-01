@@ -47,19 +47,21 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setUser(getStoredUser());
-    setProfile(readProfile());
-    authApi
-      .me()
-      .then((response) => {
-        const currentToken = window.localStorage.getItem("techsphere_auth_token");
-        if (currentToken) {
-          saveAuthSession({ user: response.user, accessToken: currentToken });
-          setUser(response.user);
-        }
-      })
-      .catch(() => undefined);
-    ordersApi.list().then(setOrders).catch(() => setOrders([]));
+    queueMicrotask(() => {
+      setUser(getStoredUser());
+      setProfile(readProfile());
+      authApi
+        .me()
+        .then((response) => {
+          const currentToken = window.localStorage.getItem("techsphere_auth_token");
+          if (currentToken) {
+            saveAuthSession({ user: response.user, accessToken: currentToken });
+            setUser(response.user);
+          }
+        })
+        .catch(() => undefined);
+      ordersApi.list().then(setOrders).catch(() => setOrders([]));
+    });
   }, []);
 
   const totalSpent = useMemo(

@@ -43,7 +43,7 @@ class OrderRepository {
         items: request.items as object[],
         totalAmount,
         shippingAddress: request.shippingAddress as object,
-        status: OrderStatus.PENDING_PAYMENT,
+        status: OrderStatus.PENDING,
         paymentMethod: request.paymentMethod || "SEPAY_QR",
       },
     });

@@ -143,7 +143,7 @@ CREATE TABLE "shipments" (
     "orderId" TEXT NOT NULL,
     "carrier" TEXT NOT NULL,
     "trackingNumber" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'SCHEDULED',
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
     "estimatedDelivery" TIMESTAMP(3),
     "actualDelivery" TIMESTAMP(3),
     "shippingAddress" JSONB NOT NULL,

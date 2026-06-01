@@ -4,7 +4,11 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus, KafkaEventBus } from "@ecommerce/shared";
+import {
+  RedisEventBus,
+  KafkaEventBus,
+  checkKafkaConnectivity,
+} from "@ecommerce/shared";
 import { config } from "./config";
 import { createInventoryRoutes } from "./routes/inventory.routes";
 import { registerEventHandlers } from "./handlers/inventory.handler";
@@ -58,19 +62,13 @@ async function main() {
 
   app.use("/api/inventory", createInventoryRoutes(eventBus, eventStore));
 
-  app.get("/health", (_req, res) => {
-    (async () => {
+  app.get("/health", async (_req, res) => {
+    try {
       let kafkaConnected = null;
       if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
-        try {
-          const { checkKafkaConnectivity } =
-            await import("@ecommerce/shared");
-          kafkaConnected = await checkKafkaConnectivity(
-            process.env.KAFKA_BOOTSTRAP_SERVERS,
-          );
-        } catch {
-          kafkaConnected = false;
-        }
+        kafkaConnected = await checkKafkaConnectivity(
+          process.env.KAFKA_BOOTSTRAP_SERVERS,
+        ).catch(() => false);
       }
 
       res.json({
@@ -80,7 +78,16 @@ async function main() {
         kafka: kafkaConnected,
         timestamp: new Date().toISOString(),
       });
-    })();
+    } catch (error) {
+      console.error(`[${config.serviceName}] Health check failed:`, error);
+      res.status(503).json({
+        service: config.serviceName,
+        status: "degraded",
+        uptime: process.uptime(),
+        kafka: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   app.listen(config.port, () => {

@@ -4,12 +4,65 @@
 
 import express from "express";
 import cors from "cors";
-import { RedisEventBus, KafkaEventBus, createEvent } from "@ecommerce/shared";
+import {
+  RedisEventBus,
+  KafkaEventBus,
+  createEvent,
+  checkKafkaConnectivity,
+} from "@ecommerce/shared";
 import { config } from "./config";
 import { createPaymentRoutes } from "./routes/payment.routes";
 import { registerEventHandlers } from "./handlers/payment.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
+
+async function ensurePaymentAdminData() {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "provider" TEXT NOT NULL DEFAULT 'SEPAY'`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "qrCode" TEXT`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "transferContent" TEXT`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP(3)`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "expiredAt" TIMESTAMP(3)`);
+
+  await prisma.payment.deleteMany({
+    where: {
+      OR: [
+        { id: { startsWith: "pay-ts-" } },
+        { orderId: { startsWith: "order-ts-" } },
+        { idempotencyKey: { startsWith: "admin-seed-" } },
+      ],
+    },
+  });
+
+  const methods = ["SEPAY_QR", "PAYPAL", "STRIPE", "BANK_TRANSFER"];
+  const paymentStatusForIndex = (index: number) => (index >= 56 ? "FAILED" : index <= 20 ? "PENDING" : "COMPLETED");
+  const demoPayments = Array.from({ length: 60 }, (_, index) => {
+    const orderIndex = index + 1;
+    const status = paymentStatusForIndex(orderIndex);
+    return {
+      id: `pay-ts-${9600 + orderIndex}`,
+      orderId: `order-ts-${9600 + orderIndex}`,
+      customerId: `user-flow-${String(orderIndex).padStart(2, "0")}`,
+      amount: 350000 + orderIndex * 45000,
+      method: methods[index % methods.length],
+      status,
+      transactionId: status === "COMPLETED" ? `PAID-TS-${9600 + orderIndex}` : null,
+    };
+  });
+
+  for (const payment of demoPayments) {
+    await prisma.payment.create({
+      data: {
+        ...payment,
+        currency: "VND",
+        provider: payment.method === "STRIPE" ? "Stripe Gateway" : "SEPAY",
+        idempotencyKey: `admin-seed-${payment.orderId}`,
+        paidAt: payment.status === "COMPLETED" ? new Date() : null,
+      },
+    });
+  }
+
+  console.log(`[${config.serviceName}] Ensured ${demoPayments.length} admin demo payments`);
+}
 
 async function main() {
   // Connect to PostgreSQL with retry
@@ -28,6 +81,9 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
+  await prisma.$connect();
+  await ensurePaymentAdminData();
+  console.log(`[${config.serviceName}] Connected to PostgreSQL`);
 
   const app = express();
   app.use(cors({ origin: config.cors.origin }));
@@ -39,17 +95,17 @@ async function main() {
 
   const eventBus = process.env.KAFKA_BOOTSTRAP_SERVERS
     ? new KafkaEventBus(
-        process.env.KAFKA_BOOTSTRAP_SERVERS,
-        config.serviceName,
-        {
-          maxRetries: process.env.KAFKA_MAX_RETRIES
-            ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
-            : undefined,
-          baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
-            ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
-            : undefined,
-        },
-      )
+      process.env.KAFKA_BOOTSTRAP_SERVERS,
+      config.serviceName,
+      {
+        maxRetries: process.env.KAFKA_MAX_RETRIES
+          ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
+          : undefined,
+        baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
+          ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
+          : undefined,
+      },
+    )
     : new RedisEventBus(config.redis.url, config.serviceName);
   const eventStore = new PrismaEventStore(prisma);
 
@@ -69,11 +125,11 @@ async function main() {
       });
 
       for (const payment of expiredPayments) {
-        console.log(`[PaymentService Cron] Expiring payment ${payment.id} for order ${payment.orderId}`);
-        
+        console.log(`[PaymentService Cron] Failing expired payment ${payment.id} for order ${payment.orderId}`);
+
         await prisma.payment.update({
           where: { id: payment.id },
-          data: { status: "EXPIRED" },
+          data: { status: "FAILED" },
         });
 
         const failEvent = createEvent<any>(
@@ -88,7 +144,7 @@ async function main() {
           payment.idempotencyKey,
           {
             provider: "SEPAY",
-            status: "EXPIRED",
+            status: "FAILED",
           }
         );
 
@@ -100,19 +156,13 @@ async function main() {
     }
   }, 5 * 60 * 1000);
 
-  app.get("/health", (_req, res) => {
-    (async () => {
+  app.get("/health", async (_req, res) => {
+    try {
       let kafkaConnected = null;
       if (process.env.KAFKA_BOOTSTRAP_SERVERS) {
-        try {
-          const { checkKafkaConnectivity } =
-            await import("@ecommerce/shared");
-          kafkaConnected = await checkKafkaConnectivity(
-            process.env.KAFKA_BOOTSTRAP_SERVERS,
-          );
-        } catch {
-          kafkaConnected = false;
-        }
+        kafkaConnected = await checkKafkaConnectivity(
+          process.env.KAFKA_BOOTSTRAP_SERVERS,
+        ).catch(() => false);
       }
 
       res.json({
@@ -122,7 +172,16 @@ async function main() {
         kafka: kafkaConnected,
         timestamp: new Date().toISOString(),
       });
-    })();
+    } catch (error) {
+      console.error(`[${config.serviceName}] Health check failed:`, error);
+      res.status(503).json({
+        service: config.serviceName,
+        status: "degraded",
+        uptime: process.uptime(),
+        kafka: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   app.listen(config.port, () => {
