@@ -2,31 +2,102 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { MessageSquareCode, X, Send, ShoppingCart, Sparkles, Loader2, RefreshCw } from "lucide-react";
-import { aiApi, getStoredUser } from "@/lib/api";
+import { MessageSquareCode, X, Send, ShoppingCart, Sparkles, Loader2, RefreshCw, CheckCircle2, Zap } from "lucide-react";
+import { aiApi } from "@/lib/api";
+import type { AgentAction } from "@/lib/api";
 import { readCart, getCartItems, addToCart } from "@/lib/cart";
 
+// ==========================================
+// Toast Notification Component
+// ==========================================
+interface ToastProps {
+  message: string;
+  onClose: () => void;
+}
+
+function CartToast({ message, onClose }: ToastProps) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3500);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+      transition={{ type: "spring", duration: 0.4 }}
+      className="mb-3 flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-950/90 px-4 py-3 shadow-2xl backdrop-blur-md"
+    >
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20">
+        <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+      </div>
+      <p className="text-sm font-medium text-emerald-100">{message}</p>
+    </motion.div>
+  );
+}
+
+// ==========================================
+// Agent Action Badge (shown inside bot bubble)
+// ==========================================
+interface AgentActionBadgeProps {
+  action: AgentAction;
+}
+
+function AgentActionBadge({ action }: AgentActionBadgeProps) {
+  if (action.type !== "ADD_TO_CART" || !action.productName) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: 0.2, type: "spring" }}
+      className="mt-2.5 flex items-center gap-2.5 rounded-xl border border-emerald-500/40 bg-emerald-950/60 px-3 py-2.5"
+    >
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/20">
+        <Zap className="h-4 w-4 text-emerald-400" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+          Agent đã thực hiện
+        </p>
+        <p className="text-xs font-medium text-emerald-100">
+          🛒 Đã thêm {action.quantity ?? 1}× {action.productName}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ==========================================
+// Message Interface
+// ==========================================
 interface Message {
   role: "user" | "bot";
   text: string;
   suggestedProducts?: Array<{ productId: string; reason: string }>;
+  agentAction?: AgentAction;
 }
 
+// ==========================================
+// Main AIChatBox Component
+// ==========================================
 export function AIChatBox() {
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "bot",
-      text: "Destiny xin kính chào quý khách! Tôi là Trợ lý Mua sắm thông minh của bạn. Hôm nay tôi có thể giúp gì cho bạn? (Ví dụ: 'Tư vấn điện thoại chơi game tốt', 'Gợi ý phụ kiện đi kèm giỏ hàng hiện tại...')"
+      text: "Destiny xin kính chào quý khách! Tôi là Trợ lý AI mua sắm thông minh của bạn. Hôm nay tôi có thể giúp gì? (Ví dụ: 'Tư vấn điện thoại chơi game tốt', hay 'Lấy cho mình iPhone 15 Pro Max đi' để tôi thêm vào giỏ hàng luôn!)"
     }
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState("");
-  
+  const [toast, setToast] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Khởi tạo sessionId duy nhất cho mỗi phiên làm việc (Session)
+  // Khởi tạo sessionId duy nhất cho mỗi phiên làm việc
   useEffect(() => {
     let storedSessionId = window.localStorage.getItem("techsphere_ai_session_id");
     if (!storedSessionId) {
@@ -71,12 +142,20 @@ export function AIChatBox() {
         cart_items: cartItemsPayload
       });
 
-      // 4. Thêm câu trả lời của Bot (đã bao gồm đề xuất SP) vào giao diện
+      // 4. Xử lý Agent Action — tự động thêm vào giỏ hàng nếu có
+      if (res.ok && res.agent_action?.type === "ADD_TO_CART" && res.agent_action.productId) {
+        const { productId, quantity = 1, confirmMessage, productName } = res.agent_action;
+        addToCart(productId, quantity);
+        setToast(confirmMessage ?? `Đã thêm ${productName} vào giỏ hàng!`);
+      }
+
+      // 5. Thêm câu trả lời của Bot (đã bao gồm đề xuất SP + agent action) vào giao diện
       if (res.ok) {
         setMessages(prev => [...prev, {
           role: "bot",
           text: res.bot_response,
-          suggestedProducts: res.suggested_products
+          suggestedProducts: res.suggested_products,
+          agentAction: res.agent_action
         }]);
       } else {
         throw new Error("Lỗi phản hồi API");
@@ -94,7 +173,7 @@ export function AIChatBox() {
 
   const handleAddToCart = (productId: string, productName: string) => {
     addToCart(productId, 1);
-    alert(`Đã thêm 1 sản phẩm "${productName}" vào giỏ hàng thành công! 🛒`);
+    setToast(`Đã thêm ${productName} vào giỏ hàng!`);
   };
 
   const handleResetChat = () => {
@@ -105,7 +184,7 @@ export function AIChatBox() {
       setMessages([
         {
           role: "bot",
-          text: "Destiny đã sẵn sàng tư vấn phiên mới! Quý khách có thể hỏi bất kỳ câu hỏi nào về sản phẩm công nghệ hoặc nhờ tôi phân tích giỏ hàng để giới thiệu phụ kiện đi kèm phù hợp."
+          text: "Destiny đã sẵn sàng tư vấn phiên mới! Quý khách có thể hỏi bất kỳ câu hỏi nào về sản phẩm công nghệ, hoặc nói 'Lấy cho mình [tên sản phẩm]' để tôi thêm vào giỏ hàng ngay cho quý khách!"
         }
       ]);
     }
@@ -113,6 +192,14 @@ export function AIChatBox() {
 
   return (
     <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end font-sans">
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <CartToast message={toast} onClose={() => setToast(null)} />
+        )}
+      </AnimatePresence>
+
       {/* 1. KHUNG CHAT (CHỈ HIỂN THỊ KHI OPEN) */}
       <AnimatePresence>
         {isOpen && (
@@ -121,9 +208,9 @@ export function AIChatBox() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
             transition={{ type: "spring", duration: 0.4 }}
-            className="mb-4 flex h-[500px] w-[380px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-2xl backdrop-blur-md"
+            className="mb-4 flex h-[520px] w-[390px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-background/95 shadow-2xl backdrop-blur-md"
           >
-            {/* Header của Khung Chat */}
+            {/* Header */}
             <div className="flex items-center justify-between bg-primary px-4 py-3 text-primary-foreground">
               <div className="flex items-center gap-2.5">
                 <div className="relative">
@@ -137,7 +224,10 @@ export function AIChatBox() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-sm tracking-wide">Destiny Assistant</h3>
-                  <p className="text-[10.5px] text-primary-foreground/75 font-medium">Trợ lý ảo Online</p>
+                  <div className="flex items-center gap-1">
+                    <Zap className="h-3 w-3 text-emerald-300" />
+                    <p className="text-[10.5px] text-primary-foreground/75 font-medium">AI Agent · Có thể tự thêm giỏ hàng</p>
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -167,8 +257,8 @@ export function AIChatBox() {
                   <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider px-1">
                     {msg.role === "user" ? "BẠN" : "DESTINY ASSISTANT"}
                   </span>
-                  
-                  {/* Bong bóng chat văn bản */}
+
+                  {/* Bong bóng chat */}
                   <div
                     className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-sm leading-relaxed ${
                       msg.role === "user"
@@ -177,16 +267,21 @@ export function AIChatBox() {
                     }`}
                   >
                     <p className="whitespace-pre-line">{msg.text}</p>
+
+                    {/* Agent Action Badge — hiển thị ngay trong bubble bot */}
+                    {msg.role === "bot" && msg.agentAction && (
+                      <AgentActionBadge action={msg.agentAction} />
+                    )}
                   </div>
 
-                  {/* Phần hiển thị Sản phẩm được gợi ý */}
+                  {/* Sản phẩm được gợi ý */}
                   {msg.role === "bot" && msg.suggestedProducts && msg.suggestedProducts.length > 0 && (
                     <div className="mt-2.5 w-[90%] space-y-2">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-primary/95 px-1">
                         <ShoppingCart className="h-3.5 w-3.5" />
                         <span>Sản phẩm khuyên dùng:</span>
                       </div>
-                      
+
                       <div className="space-y-2">
                         {msg.suggestedProducts.map((prod, pIdx) => (
                           <div
@@ -225,11 +320,11 @@ export function AIChatBox() {
                   </span>
                   <div className="flex items-center gap-2 rounded-2xl rounded-tl-none border border-border/40 bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span>Trợ lý đang suy nghĩ và phân tích...</span>
+                    <span>Trợ lý đang phân tích và xử lý...</span>
                   </div>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -240,7 +335,7 @@ export function AIChatBox() {
                 value={message}
                 onChange={e => setMessage(e.target.value)}
                 disabled={isLoading}
-                placeholder="Dạ, quý khách muốn hỏi gì ạ?"
+                placeholder="Hỏi hoặc 'Lấy cho mình iPhone 15...' 🛒"
                 className="flex-1 rounded-xl bg-muted px-4 py-2 text-sm text-foreground placeholder-muted-foreground/75 border border-transparent focus:border-primary/30 focus:outline-none disabled:opacity-50"
               />
               <button

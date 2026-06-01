@@ -54,9 +54,36 @@ const responseSchema = {
         },
         required: ["productId", "reason"]
       }
+    },
+    agent_action: {
+      type: "OBJECT",
+      description: "Hành động tự động mà Agent sẽ thực hiện thay mặt khách hàng. Đặt type=NONE nếu không cần thực hiện hành động nào.",
+      properties: {
+        type: {
+          type: "STRING",
+          description: "Loại hành động: ADD_TO_CART khi khách muốn mua, NONE khi chỉ tư vấn."
+        },
+        productId: {
+          type: "STRING",
+          description: "Mã ID sản phẩm cần thêm vào giỏ hàng (chỉ dùng khi type=ADD_TO_CART)"
+        },
+        productName: {
+          type: "STRING",
+          description: "Tên sản phẩm cần thêm vào giỏ hàng"
+        },
+        quantity: {
+          type: "NUMBER",
+          description: "Số lượng sản phẩm cần thêm. Mặc định 1 nếu khách không nêu rõ."
+        },
+        confirmMessage: {
+          type: "STRING",
+          description: "Thông báo xác nhận hành động đã thực hiện để hiển thị cho khách hàng."
+        }
+      },
+      required: ["type"]
     }
   },
-  required: ["bot_response", "suggested_products"]
+  required: ["bot_response", "suggested_products", "agent_action"]
 };
 
 // Hàm lấy dữ liệu sản phẩm thực tế từ Inventory Service (In-Context RAG)
@@ -80,13 +107,64 @@ async function fetchInventoryProducts(): Promise<any[]> {
   }
 }
 
+// Các từ khoá thể hiện ý định mua hàng
+const BUY_INTENT_KEYWORDS = [
+  "lấy", "mua", "thêm vào giỏ", "cho mình", "cho tôi", "đặt", "order",
+  "muốn mua", "muốn lấy", "muốn đặt", "chốt", "ok lấy", "được rồi lấy",
+  "add", "thêm", "bỏ vào giỏ"
+];
+
+// Map từ khoá sản phẩm sang productId
+const PRODUCT_KEYWORD_MAP: Array<{ keywords: string[]; productId: string; productName: string }> = [
+  { keywords: ["iphone", "iphone 15", "iphone 15 pro", "iphone 15 pro max"], productId: "PROD-001", productName: "iPhone 15 Pro Max" },
+  { keywords: ["samsung", "galaxy", "s24", "s24 ultra", "samsung galaxy"], productId: "PROD-002", productName: "Samsung Galaxy S24 Ultra" },
+  { keywords: ["macbook", "macbook pro", "macbook m3", "mac"], productId: "PROD-003", productName: "MacBook Pro M3" },
+  { keywords: ["airpods", "airpods pro", "tai nghe", "airpods pro 2"], productId: "PROD-004", productName: "AirPods Pro 2" },
+  { keywords: ["ipad", "ipad air", "ipad m2", "ipad air m2", "máy tính bảng"], productId: "PROD-005", productName: "iPad Air M2" },
+];
+
+function detectBuyIntent(message: string): { hasBuyIntent: boolean; productId?: string; productName?: string; quantity: number } {
+  const msgLower = message.toLowerCase();
+  const hasBuyIntent = BUY_INTENT_KEYWORDS.some(kw => msgLower.includes(kw));
+
+  if (!hasBuyIntent) return { hasBuyIntent: false, quantity: 1 };
+
+  // Nhận diện sản phẩm từ message
+  let matchedProduct: { productId: string; productName: string } | undefined;
+  for (const entry of PRODUCT_KEYWORD_MAP) {
+    if (entry.keywords.some(kw => msgLower.includes(kw))) {
+      matchedProduct = { productId: entry.productId, productName: entry.productName };
+      break;
+    }
+  }
+
+  // Nhận diện số lượng (ví dụ: "2 cái", "3 chiếc")
+  const quantityMatch = msgLower.match(/(\d+)\s*(cái|chiếc|cái|sp|sản phẩm)?/);
+  const quantity = quantityMatch ? Math.min(parseInt(quantityMatch[1]), 10) : 1;
+
+  return { hasBuyIntent: true, ...matchedProduct, quantity };
+}
+
 // Bộ tạo phản hồi dự phòng thông minh (khi API Gemini bị lỗi Quota 429 hoặc quá tải)
-function generateMockResponse(message: string, dbProducts: any[]): { bot_response: string, suggested_products: any[] } {
+function generateMockResponse(message: string, dbProducts: any[]): { bot_response: string, suggested_products: any[], agent_action: any } {
   const msgLower = message.toLowerCase();
   let selectedProducts: any[] = [];
   let responseText = "";
+  let agent_action: any = { type: "NONE" };
 
-  if (msgLower.includes("iphone") || msgLower.includes("samsung") || msgLower.includes("điện thoại") || msgLower.includes("phone")) {
+  // Kiểm tra ý định mua hàng trước
+  const buyIntent = detectBuyIntent(message);
+  if (buyIntent.hasBuyIntent && buyIntent.productId) {
+    selectedProducts = dbProducts.filter(p => p.productId !== buyIntent.productId).slice(0, 2);
+    responseText = `Dạ, Destiny đã thêm ${buyIntent.quantity} ${buyIntent.productName} vào giỏ hàng của quý khách rồi ạ! 🛒 Quý khách có muốn tham khảo thêm phụ kiện đi kèm không ạ?`;
+    agent_action = {
+      type: "ADD_TO_CART",
+      productId: buyIntent.productId,
+      productName: buyIntent.productName,
+      quantity: buyIntent.quantity,
+      confirmMessage: `Đã thêm ${buyIntent.quantity} ${buyIntent.productName} vào giỏ hàng thành công!`
+    };
+  } else if (msgLower.includes("iphone") || msgLower.includes("samsung") || msgLower.includes("điện thoại") || msgLower.includes("phone")) {
     selectedProducts = dbProducts.filter(p => 
       p.productName.toLowerCase().includes("iphone") || 
       p.productName.toLowerCase().includes("samsung")
@@ -109,7 +187,6 @@ function generateMockResponse(message: string, dbProducts: any[]): { bot_respons
     );
     responseText = "Dạ, Destiny có sẵn iPad Air M2 siêu mỏng nhẹ, màn hình Liquid Retina sắc nét cực phù hợp cho việc học tập, giải trí hay vẽ thiết kế sáng tạo. Xin mời quý khách tham khảo nhé!";
   } else {
-    // Mặc định gợi ý ngẫu nhiên
     selectedProducts = dbProducts.slice(0, 2);
     responseText = "Dạ, Destiny Assistant xin kính chào quý khách! Hiện tại kết nối Gemini API đang tạm thời bị quá giới hạn hạn ngạch (Quota 429), tuy nhiên tôi đã tự động chuyển sang chế độ dự phòng thông minh để hỗ trợ quý khách duyệt kho hàng thực tế. Dưới đây là các sản phẩm nổi bật nhất đang có sẵn tại cửa hàng, quý khách tham khảo nhé ạ!";
   }
@@ -123,10 +200,7 @@ function generateMockResponse(message: string, dbProducts: any[]): { bot_respons
     reason: `Sản phẩm ${p.productName} đang sẵn hàng tại kho Destiny với giá ưu đãi.`
   }));
 
-  return {
-    bot_response: responseText,
-    suggested_products
-  };
+  return { bot_response: responseText, suggested_products, agent_action };
 }
 
 // Lắng nghe API: POST /api/ai/chat
@@ -161,9 +235,9 @@ app.post("/api/ai/chat", async (req: Request, res: Response): Promise<void> => {
 
     // D. Xây dựng System Instruction động chứa ngữ cảnh hoàn chỉnh
     const systemInstruction = `
-Bạn là "Destiny Assistant" - Trợ lý tư vấn mua sắm công nghệ chuyên nghiệp, cực kỳ nhiệt tình, ấm áp và am hiểu tâm lý khách hàng tại cửa hàng công nghệ Destiny E-Commerce.
+Bạn là "Destiny Assistant" - Trợ lý tư vấn mua sắm công nghệ kiêm AI Agent chuyên nghiệp, cực kỳ nhiệt tình, ấm áp và am hiểu tâm lý khách hàng tại cửa hàng công nghệ Destiny E-Commerce.
 
-Nhiệm vụ của bạn là giải đáp mọi thắc mắc của khách hàng về sản phẩm và khéo léo gợi ý sản phẩm phù hợp dựa trên sở thích, nhu cầu hoặc giỏ hàng hiện tại của họ.
+Nhiệm vụ của bạn là giải đáp mọi thắc mắc về sản phẩm, gợi ý sản phẩm phù hợp, và tự động thực hiện hành động mua sắm thay mặt khách hàng khi được yêu cầu.
 
 ---
 THÔNG TIN KHÁCH HÀNG HIỆN TẠI:
@@ -172,8 +246,28 @@ THÔNG TIN KHÁCH HÀNG HIỆN TẠI:
 ${formattedCart}
 
 ---
-DANH MỤC SẢN PHẨM HỢP LỆ ĐANG CÓ SẴN TRONG KHO (BẠN CHỈ ĐƯỢC GỢI Ý CÁC SẢN PHẨM NÀY):
+DANH MỤC SẢN PHẨM HỢP LỆ ĐANG CÓ SẴN TRONG KHO (CHỈ GỢI Ý CÁC SẢN PHẨM NÀY):
 ${formattedProducts}
+
+---
+HƯỚNG DẪN AGENT ACTION (RẤT QUAN TRỌNG):
+Trong mỗi phản hồi, bạn PHẢI điền trường "agent_action" với một trong hai giá trị:
+
+✅ Khi khách hàng rõ ràng muốn mua/thêm sản phẩm vào giỏ hàng (ví dụ: "lấy cho mình", "mua cái này", "thêm vào giỏ", "cho tôi", "chốt đơn", "đặt hàng", "ok mua", "được rồi lấy", "mình lấy cái") thì đặt:
+  agent_action.type = "ADD_TO_CART"
+  agent_action.productId = <mã ID sản phẩm khớp chính xác trong danh mục>
+  agent_action.productName = <tên sản phẩm>
+  agent_action.quantity = <số lượng, mặc định 1 nếu khách không nêu rõ>
+  agent_action.confirmMessage = "Đã thêm [tên sản phẩm] vào giỏ hàng thành công! 🛒"
+  Đồng thời, bot_response phải xác nhận hành động đã thực hiện một cách vui vẻ và gợi ý thêm phụ kiện đi kèm.
+
+❌ Trong TẤT CẢ các trường hợp khác (chỉ hỏi, tư vấn, xem sản phẩm) thì đặt:
+  agent_action.type = "NONE"
+
+LƯU Ý QUAN TRỌNG:
+- CHỈ thực hiện ADD_TO_CART với sản phẩm CÓ TRONG danh mục hợp lệ ở trên
+- Nếu khách muốn mua sản phẩm không có trong danh mục, hãy từ chối khéo léo và gợi ý sản phẩm thay thế
+- Số lượng tối đa 1 lần thêm là 10 sản phẩm
 
 ---
 CÁC NGUYÊN TẮC NGHIÊM NGẶT (GUARDRAILS):
@@ -241,11 +335,12 @@ CÁC NGUYÊN TẮC NGHIÊM NGẶT (GUARDRAILS):
     // Lưu lại vào Redis với thời gian sống (TTL) 30 phút (1800 giây)
     await redisClient.setex(redisKey, 1800, JSON.stringify(chatHistory));
 
-    // G. Trả phản hồi chuẩn về cho client
+    // G. Trả phản hồi chuẩn về cho client (bao gồm agent_action)
     res.json({
       ok: true,
       bot_response: parsedResult.bot_response,
-      suggested_products: parsedResult.suggested_products
+      suggested_products: parsedResult.suggested_products,
+      agent_action: parsedResult.agent_action ?? { type: "NONE" }
     });
 
   } catch (error) {

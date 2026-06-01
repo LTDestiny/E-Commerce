@@ -320,10 +320,19 @@ export interface AIChatPayload {
   cart_items?: any[];
 }
 
+export interface AgentAction {
+  type: "ADD_TO_CART" | "NONE";
+  productId?: string;
+  productName?: string;
+  quantity?: number;
+  confirmMessage?: string;
+}
+
 export interface AIChatResponse {
   ok: boolean;
   bot_response: string;
   suggested_products: Array<{ productId: string; reason: string }>;
+  agent_action?: AgentAction;
 }
 
 export const aiApi = {
