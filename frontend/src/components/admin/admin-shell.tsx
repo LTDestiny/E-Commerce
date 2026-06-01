@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   clearAuthSession,
+  createEventStream,
   notificationsApi,
   ordersApi,
   paymentsApi,
@@ -34,7 +35,7 @@ import {
   type Shipment,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react";
 
 const navItems = [
   { href: "/admin/dashboard", label: "Dashboard", icon: Gauge },
@@ -85,26 +86,45 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     });
   }, [pathname, router]);
 
+  const reload = useCallback(() => {
+    void Promise.allSettled([
+      notificationsApi.list(),
+      ordersApi.list(true),
+      paymentsApi.list(),
+      shipmentsApi.list(),
+      usersApi.list(),
+    ]).then(([notificationResult, orderResult, paymentResult, shipmentResult, userResult]) => {
+      if (notificationResult.status === "fulfilled") setNotifications(notificationResult.value);
+      if (orderResult.status === "fulfilled") setOrders(orderResult.value);
+      if (paymentResult.status === "fulfilled") setPayments(paymentResult.value);
+      if (shipmentResult.status === "fulfilled") setShipments(shipmentResult.value);
+      if (userResult.status === "fulfilled") setUsers(userResult.value);
+    });
+  }, []);
+
   useEffect(() => {
     if (!checked) return;
     queueMicrotask(() => {
       const raw = window.localStorage.getItem("techsphere_admin_read_notifications");
       setReadIds(new Set(raw ? JSON.parse(raw) : []));
-      void Promise.allSettled([
-        notificationsApi.list(),
-        ordersApi.list(true),
-        paymentsApi.list(),
-        shipmentsApi.list(),
-        usersApi.list(),
-      ]).then(([notificationResult, orderResult, paymentResult, shipmentResult, userResult]) => {
-        if (notificationResult.status === "fulfilled") setNotifications(notificationResult.value);
-        if (orderResult.status === "fulfilled") setOrders(orderResult.value);
-        if (paymentResult.status === "fulfilled") setPayments(paymentResult.value);
-        if (shipmentResult.status === "fulfilled") setShipments(shipmentResult.value);
-        if (userResult.status === "fulfilled") setUsers(userResult.value);
-      });
+      reload();
     });
-  }, [checked]);
+  }, [checked, reload]);
+
+  useEffect(() => {
+    if (!checked) return;
+    const es = createEventStream(
+      (event) => {
+        if (event && event.type !== "CONNECTED") {
+          reload();
+        }
+      },
+      () => {}
+    );
+    return () => {
+      es.close();
+    };
+  }, [checked, reload]);
 
   useEffect(() => {
     if (!notificationOpen) return;

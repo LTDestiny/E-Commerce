@@ -180,6 +180,7 @@ CREATE TABLE "notifications" (
     "subject" TEXT NOT NULL,
     "body" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "isRead" BOOLEAN NOT NULL DEFAULT FALSE,
     "sentAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "notifications_pkey" PRIMARY KEY ("id")
@@ -223,3 +224,8 @@ CREATE TABLE "users" (
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 CREATE UNIQUE INDEX "users_refreshTokenJti_key" ON "users"("refreshTokenJti");
 CREATE UNIQUE INDEX "users_resetPasswordToken_key" ON "users"("resetPasswordToken");
+
+INSERT INTO "users" ("id", "name", "email", "passwordHash", "role", "createdAt", "updatedAt") 
+VALUES ('usr-admin-1', 'Admin User', 'admin@gmail.com', '$2b$10$zddqgz5Gtg6Hrw1sQsFt5.YkD8ltHAatJe6SiaWj8VhhYF5fDfRGm', 'ADMIN', NOW(), NOW());
+INSERT INTO "users" ("id", "name", "email", "passwordHash", "role", "createdAt", "updatedAt") 
+VALUES ('usr-user-1', 'Test User', 'user@gmail.com', '$2b$10$OMVywDy0mQuqY4qTgt8A1.p8mLnrXXgmOfiX4afeJSy36OTO3hQmi', 'USER', NOW(), NOW());

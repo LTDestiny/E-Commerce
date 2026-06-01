@@ -206,6 +206,23 @@ async function issueTokens(user: JwtUser, res: Response) {
 }
 
 async function main() {
+  // Connect to PostgreSQL with retry
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      await prisma.$connect();
+      console.log(`[${config.serviceName}] Connected to PostgreSQL`);
+      break;
+    } catch (err) {
+      retries -= 1;
+      console.warn(`[${config.serviceName}] Database connection failed. Retries left: ${retries}. Error:`, err);
+      if (retries === 0) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
+
   await prisma.$connect();
   await ensureDemoUsers();
   const app = express();
@@ -319,13 +336,13 @@ async function main() {
     if (token) {
       try {
         const payload = verifyRefreshToken(token);
-        
+
         // Remove whitelist in Redis
         const redisKey = `auth:refresh:${payload.id}:${payload.jti}`;
         await redisClient.del(redisKey);
 
         await prisma.user.update({ where: { id: payload.id }, data: { refreshTokenHash: null, refreshTokenJti: null, refreshTokenExp: null } });
-      } catch {}
+      } catch { }
     }
     res.clearCookie(REFRESH_COOKIE, { path: "/api/auth", httpOnly: true, secure: config.cookie.secure, sameSite: config.cookie.sameSite });
     return res.json({ ok: true });

@@ -13,6 +13,7 @@ import {
   createEvent,
   ShippingScheduledEvent,
   OrderShippedEvent,
+  OrderDeliveredEvent,
   sleep,
   generateId,
   IdempotencyStore,
@@ -124,6 +125,32 @@ export function registerEventHandlers(
           console.log(
             `[${config.serviceName}] 🚚 Order ${orderId} shipped: ${trackingNumber}`,
           );
+
+          // Simulate automatic delivery after another 5 seconds
+          setTimeout(async () => {
+            await shipmentRepository.updateStatus(
+              shipment.id,
+              ShippingStatus.DELIVERED,
+            );
+
+            const deliveredEvent = createEvent<OrderDeliveredEvent>(
+              "ORDER_DELIVERED",
+              config.serviceName,
+              {
+                orderId,
+                shipmentId: shipment.id,
+                deliveredAt: new Date().toISOString(),
+              },
+              event.correlationId,
+            );
+
+            await eventStore.append(deliveredEvent);
+            await eventBus.publish(EVENT_CHANNELS.ORDER_DELIVERED, deliveredEvent);
+
+            console.log(
+              `[${config.serviceName}] 🎁 Order ${orderId} delivered and completed`,
+            );
+          }, 5000);
         }, 5000);
       } catch (err) {
         console.error(`[${config.serviceName}] Shipping handler error:`, err);

@@ -251,7 +251,9 @@ async function tryConfirmOrder(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): Promise<void> {
-  const state = sagaState.get(orderId);
+  const state =
+    (await sagaStore?.get<SagaState>(orderId)) ||
+    sagaState.get(orderId);
   if (!state?.stockReserved || !state?.paymentProcessed) return;
 
   const order = await orderRepository.updateStatus(

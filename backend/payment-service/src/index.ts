@@ -65,6 +65,22 @@ async function ensurePaymentAdminData() {
 }
 
 async function main() {
+  // Connect to PostgreSQL with retry
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      await prisma.$connect();
+      console.log(`[${config.serviceName}] Connected to PostgreSQL`);
+      break;
+    } catch (err) {
+      retries -= 1;
+      console.warn(`[${config.serviceName}] Database connection failed. Retries left: ${retries}. Error:`, err);
+      if (retries === 0) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
   await prisma.$connect();
   await ensurePaymentAdminData();
   console.log(`[${config.serviceName}] Connected to PostgreSQL`);
@@ -73,23 +89,23 @@ async function main() {
   app.use(cors({ origin: config.cors.origin }));
   app.use(
     config.sepay.webhookPath,
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "*/*" }),
   );
   app.use(express.json());
 
   const eventBus = process.env.KAFKA_BOOTSTRAP_SERVERS
     ? new KafkaEventBus(
-        process.env.KAFKA_BOOTSTRAP_SERVERS,
-        config.serviceName,
-        {
-          maxRetries: process.env.KAFKA_MAX_RETRIES
-            ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
-            : undefined,
-          baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
-            ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
-            : undefined,
-        },
-      )
+      process.env.KAFKA_BOOTSTRAP_SERVERS,
+      config.serviceName,
+      {
+        maxRetries: process.env.KAFKA_MAX_RETRIES
+          ? parseInt(process.env.KAFKA_MAX_RETRIES, 10)
+          : undefined,
+        baseDelayMs: process.env.KAFKA_RETRY_BASE_MS
+          ? parseInt(process.env.KAFKA_RETRY_BASE_MS, 10)
+          : undefined,
+      },
+    )
     : new RedisEventBus(config.redis.url, config.serviceName);
   const eventStore = new PrismaEventStore(prisma);
 
@@ -110,7 +126,7 @@ async function main() {
 
       for (const payment of expiredPayments) {
         console.log(`[PaymentService Cron] Failing expired payment ${payment.id} for order ${payment.orderId}`);
-        
+
         await prisma.payment.update({
           where: { id: payment.id },
           data: { status: "FAILED" },
