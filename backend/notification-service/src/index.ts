@@ -15,38 +15,6 @@ async function ensureNotificationAdminData() {
   await prisma.$executeRawUnsafe(`ALTER TABLE "notifications" ADD COLUMN IF NOT EXISTS "isRead" BOOLEAN NOT NULL DEFAULT false`);
 
   await prisma.notification.deleteMany({ where: { orderId: { startsWith: "order-ts-" } } });
-
-  const subjects = [
-    "Order created",
-    "Admin new order alert",
-    "Payment completed",
-    "Payment failed",
-    "Shipment ready",
-    "Shipment delayed",
-    "Shipment in transit",
-    "Order delivered",
-    "Order cancelled",
-    "Low stock warning",
-  ];
-  const demoNotifications = subjects.map((subject, index) => {
-    const flowIndex = index + 1;
-    const sent = index >= 2;
-    return {
-      orderId: `order-ts-${9600 + flowIndex}`,
-      customerId: `user-flow-${String(flowIndex).padStart(2, "0")}`,
-      type: index === 1 ? "IN_APP" : "EMAIL",
-      subject: `${subject} for TS-${9600 + flowIndex}`,
-      body: `${subject} notification generated from the normalized order flow.`,
-      status: sent ? "SENT" : "PENDING",
-      isRead: index === 7,
-      sentAt: sent ? new Date() : null,
-    };
-  });
-
-  for (const item of demoNotifications) {
-    await prisma.notification.create({ data: item });
-  }
-  console.log(`[${config.serviceName}] Ensured ${demoNotifications.length} admin demo notifications`);
 }
 
 async function main() {

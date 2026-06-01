@@ -39,92 +39,18 @@ class InventoryRepository {
    * Called once at service startup.
    */
   async seedIfEmpty(): Promise<void> {
-    const products = [
-      {
-        productId: "PROD-001",
-        productName: "iPhone 15 Pro Max",
-        totalStock: 100,
-        availableStock: 100,
-        lowStockThreshold: 10,
-      },
-      {
-        productId: "PROD-002",
-        productName: "Samsung Galaxy S24 Ultra",
-        totalStock: 80,
-        availableStock: 80,
-        lowStockThreshold: 10,
-      },
-      {
-        productId: "PROD-003",
-        productName: "MacBook Pro M3",
-        totalStock: 50,
-        availableStock: 50,
-        lowStockThreshold: 5,
-      },
-      {
-        productId: "PROD-004",
-        productName: "AirPods Pro 2",
-        totalStock: 200,
-        availableStock: 200,
-        lowStockThreshold: 20,
-      },
-      {
-        productId: "PROD-005",
-        productName: "iPad Air M2",
-        totalStock: 60,
-        availableStock: 60,
-        lowStockThreshold: 8,
-      },
-      {
-        productId: "PROD-006",
-        productName: "Thanh toán Thử nghiệm 10k",
-        totalStock: 9999,
-        availableStock: 9999,
-        lowStockThreshold: 1,
-      },
-      {
-        productId: "SKU-7822-X",
-        productName: "Neural Engine Core v2",
-        totalStock: 450,
-        availableStock: 408,
-        lowStockThreshold: 50,
-      },
-      {
-        productId: "SKU-9901-B",
-        productName: "Quantum Cooling Fan",
-        totalStock: 18,
-        availableStock: 15,
-        lowStockThreshold: 20,
-      },
-      {
-        productId: "SKU-1022-L",
-        productName: "High-Density SSD 4TB",
-        totalStock: 0,
-        availableStock: 0,
-        lowStockThreshold: 10,
-      },
-      {
-        productId: "SKU-5541-M",
-        productName: "Fiber Optic Switch 48p",
-        totalStock: 1200,
-        availableStock: 1050,
-        lowStockThreshold: 100,
-      },
-      {
-        productId: "SKU-2930",
-        productName: "Titan CPU Cooler v4",
-        totalStock: 14,
-        availableStock: 2,
-        lowStockThreshold: 12,
-      },
-      {
-        productId: "SKU-1122",
-        productName: "10m Optic Fiber Cable",
-        totalStock: 38,
-        availableStock: 5,
-        lowStockThreshold: 15,
-      },
-    ];
+    const products = [] as Array<{
+      productId: string;
+      productName: string;
+      totalStock: number;
+      availableStock: number;
+      lowStockThreshold: number;
+    }>;
+
+    if (products.length === 0) {
+      console.log("[Inventory] No seed data inserted; waiting for real PostgreSQL inventory rows.");
+      return;
+    }
 
     for (const p of products) {
       await prisma.inventoryItem.upsert({

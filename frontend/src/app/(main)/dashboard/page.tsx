@@ -102,44 +102,37 @@ export default function DashboardPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      if (viewer?.role !== "ADMIN") {
-        const orders = await ordersApi.list().catch(() => [] as Order[]);
-        const byStatus = orders.reduce<Record<string, number>>((acc, order) => {
-          acc[order.status] = (acc[order.status] ?? 0) + 1;
-          return acc;
-        }, {});
-        const totalRevenue = orders
-          .filter((order) => order.status !== "CANCELLED" && order.status !== "FAILED")
-          .reduce((sum, order) => sum + order.totalAmount, 0);
-
-        setStats({
-          total: orders.length,
-          byStatus,
-          totalRevenue,
-        });
-        setHealth(null);
-        setCounts({
-          payments: 0,
-          shipments: 0,
-          notifications: 0,
-        });
-        return;
-      }
-
-      const [nextStats, nextHealth, payments, shipments, notifications] =
+      const [orders, nextHealth, payments, shipments, notifications] =
         await Promise.all([
-          ordersApi.getStats().catch(() => null),
+          ordersApi.list(true).catch(() => [] as Order[]),
           healthApi.check().catch(() => null),
           paymentsApi.list().catch(() => []),
           shipmentsApi.list().catch(() => []),
           notificationsApi.list().catch(() => []),
         ]);
-      setStats(nextStats);
+
+      const scopedOrders = viewer?.role === "ADMIN"
+        ? orders
+        : orders.filter((order) => order.customerId === viewer?.id);
+
+      const byStatus = scopedOrders.reduce<Record<string, number>>((acc, order) => {
+        acc[order.status] = (acc[order.status] ?? 0) + 1;
+        return acc;
+      }, {});
+      const totalRevenue = scopedOrders
+        .filter((order) => order.status !== "CANCELLED" && order.status !== "FAILED")
+        .reduce((sum, order) => sum + order.totalAmount, 0);
+
+      setStats({
+        total: scopedOrders.length,
+        byStatus,
+        totalRevenue,
+      });
       setHealth(nextHealth);
       setCounts({
-        payments: payments.length,
-        shipments: shipments.length,
-        notifications: notifications.length,
+        payments: viewer?.role === "ADMIN" ? payments.length : 0,
+        shipments: viewer?.role === "ADMIN" ? shipments.length : 0,
+        notifications: viewer?.role === "ADMIN" ? notifications.length : 0,
       });
     } finally {
       setLoading(false);
@@ -236,7 +229,7 @@ export default function DashboardPage() {
             <ScrollArea className="h-[500px] pr-3">
               {events.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
-                  Chưa có event. Hãy checkout một đơn ở trang Mua hàng.
+                  Chưa có event. Dữ liệu sẽ xuất hiện khi có hoạt động thật từ backend.
                 </div>
               ) : (
                 <AnimatePresence initial={false}>

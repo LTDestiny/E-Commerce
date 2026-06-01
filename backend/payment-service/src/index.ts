@@ -22,46 +22,6 @@ async function ensurePaymentAdminData() {
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "transferContent" TEXT`);
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "paidAt" TIMESTAMP(3)`);
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "expiredAt" TIMESTAMP(3)`);
-
-  await prisma.payment.deleteMany({
-    where: {
-      OR: [
-        { id: { startsWith: "pay-ts-" } },
-        { orderId: { startsWith: "order-ts-" } },
-        { idempotencyKey: { startsWith: "admin-seed-" } },
-      ],
-    },
-  });
-
-  const methods = ["SEPAY_QR", "PAYPAL", "STRIPE", "BANK_TRANSFER"];
-  const paymentStatusForIndex = (index: number) => (index >= 56 ? "FAILED" : index <= 20 ? "PENDING" : "COMPLETED");
-  const demoPayments = Array.from({ length: 60 }, (_, index) => {
-    const orderIndex = index + 1;
-    const status = paymentStatusForIndex(orderIndex);
-    return {
-      id: `pay-ts-${9600 + orderIndex}`,
-      orderId: `order-ts-${9600 + orderIndex}`,
-      customerId: `user-flow-${String(orderIndex).padStart(2, "0")}`,
-      amount: 350000 + orderIndex * 45000,
-      method: methods[index % methods.length],
-      status,
-      transactionId: status === "COMPLETED" ? `PAID-TS-${9600 + orderIndex}` : null,
-    };
-  });
-
-  for (const payment of demoPayments) {
-    await prisma.payment.create({
-      data: {
-        ...payment,
-        currency: "VND",
-        provider: payment.method === "STRIPE" ? "Stripe Gateway" : "SEPAY",
-        idempotencyKey: `admin-seed-${payment.orderId}`,
-        paidAt: payment.status === "COMPLETED" ? new Date() : null,
-      },
-    });
-  }
-
-  console.log(`[${config.serviceName}] Ensured ${demoPayments.length} admin demo payments`);
 }
 
 async function main() {

@@ -310,6 +310,21 @@ export interface InventoryItem {
   updatedAt: string;
 }
 
+export interface CatalogProduct {
+  productId: string;
+  productName: string;
+  price?: number;
+  category?: string;
+  shortDescription?: string;
+  description?: string;
+  specs?: string[];
+  accentClass?: string;
+  rating?: number;
+  sold?: number;
+  warranty?: string;
+  images?: string[];
+}
+
 export const inventoryApi = {
   list: () => fetchApi<InventoryItem[]>("/api/inventory"),
   get: (productId: string) => fetchApi<InventoryItem>(`/api/inventory/${productId}`),
