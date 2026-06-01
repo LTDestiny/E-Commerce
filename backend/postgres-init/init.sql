@@ -106,6 +106,16 @@ CREATE TABLE "inventory_items" (
     "availableStock" INTEGER NOT NULL,
     "lowStockThreshold" INTEGER NOT NULL DEFAULT 10,
     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "price" DOUBLE PRECISION,
+    "category" TEXT,
+    "shortDescription" TEXT,
+    "description" TEXT,
+    "specs" JSONB,
+    "accentClass" TEXT,
+    "rating" DOUBLE PRECISION,
+    "sold" INTEGER,
+    "warranty" TEXT,
+    "image" TEXT,
     CONSTRAINT "inventory_items_pkey" PRIMARY KEY ("productId")
 );
 
