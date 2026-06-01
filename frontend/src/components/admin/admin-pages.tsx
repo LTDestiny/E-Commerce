@@ -1234,7 +1234,7 @@ export function AdminSystemMonitorPage() {
       title="System Monitor"
       subtitle="Real-time health monitoring of TechSphere distributed services and infrastructure."
       actions={
-        <button onClick={reload} className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-3 font-bold text-white"><RefreshCw className="h-4 w-4" /> Force Refresh</button>
+        <button onClick={() => void reload()} className="inline-flex items-center gap-2 rounded-md bg-black px-5 py-3 font-bold text-white"><RefreshCw className="h-4 w-4" /> Force Refresh</button>
       }
     >
       <LoadingBlock loading={loading} error={error} />
