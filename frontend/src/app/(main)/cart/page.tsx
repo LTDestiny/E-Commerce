@@ -13,7 +13,6 @@ import {
   ShoppingCart,
   Trash2,
   UserRound,
-  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +31,7 @@ import {
   inventoryApi,
   ordersApi,
   paymentsApi,
+  createEventStream,
   type CreateOrderPayload,
   type InventoryItem,
   type Order,
@@ -76,8 +76,8 @@ export default function CartPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [sepayIntentData, setSepayIntentData] = useState<SepayIntentResponse | null>(null);
-  const [simulatingPayment, setSimulatingPayment] = useState<"SUCCESS" | "FAILED" | null>(null);
   const [simulationStatusMessage, setSimulationStatusMessage] = useState<string | null>(null);
+  const paymentRedirectedRef = useRef(false);
 
   // Poll order status when payment modal is open
   useEffect(() => {
@@ -87,12 +87,10 @@ export default function CartPage() {
     const interval = setInterval(async () => {
       try {
         const order = await ordersApi.get(createdOrder.id);
-        if (
-          order.status === "CONFIRMED" ||
-          order.status === "PROCESSING" ||
-          order.status === "COMPLETED"
-        ) {
+        if (PAID_ORDER_STATUSES.includes(order.status)) {
           clearInterval(interval);
+          if (paymentRedirectedRef.current) return;
+          paymentRedirectedRef.current = true;
           setSimulationStatusMessage("✅ Thanh toán thành công! Đơn hàng của bạn đã được ghi nhận.");
           setTimeout(() => {
             setShowPaymentModal(false);
@@ -106,6 +104,31 @@ export default function CartPage() {
 
     return () => clearInterval(interval);
   }, [showPaymentModal, createdOrder, router]);
+
+  useEffect(() => {
+    if (!showPaymentModal || !createdOrder?.id) return;
+
+    const eventSource = createEventStream((event) => {
+      const payload = event.payload as { orderId?: string } | undefined;
+      if (payload?.orderId !== createdOrder.id) return;
+
+      if (event.type === "PAYMENT_PROCESSED") {
+        if (paymentRedirectedRef.current) return;
+        paymentRedirectedRef.current = true;
+        setSimulationStatusMessage("✅ Thanh toán thành công! Đang chuyển đến trang đơn hàng...");
+        setTimeout(() => {
+          setShowPaymentModal(false);
+          router.push("/orders");
+        }, 900);
+      }
+
+      if (event.type === "PAYMENT_FAILED") {
+        setSimulationStatusMessage("Thanh toán thất bại. Vui lòng kiểm tra lại giao dịch hoặc liên hệ hỗ trợ.");
+      }
+    });
+
+    return () => eventSource.close();
+  }, [showPaymentModal, createdOrder?.id, router]);
 
   const syncCart = useCallback(() => setCart(readCart()), []);
 
@@ -143,61 +166,6 @@ export default function CartPage() {
     writeCart(next);
   }
 
-  async function waitForPaidOrder(orderId: string) {
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const order = await ordersApi.get(orderId);
-      if (PAID_ORDER_STATUSES.includes(order.status)) {
-        setCreatedOrder(order);
-        return order;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-
-    return null;
-  }
-
-  async function handleSimulatePayment(status: "SUCCESS" | "FAILED") {
-    if (!sepayIntentData?.payment?.id) return;
-    setSimulatingPayment(status);
-    setSimulationStatusMessage(null);
-
-    try {
-      const response = await paymentsApi.sepaySimulate({
-        paymentId: sepayIntentData.payment.id,
-        status,
-      });
-
-      if (response && response.ok) {
-        if (status === "SUCCESS") {
-          setSimulationStatusMessage("Thanh toán thành công. Đang cập nhật đơn hàng...");
-          const paidOrder = await waitForPaidOrder(sepayIntentData.payment.orderId);
-
-          if (paidOrder) {
-            setSimulationStatusMessage("Đơn hàng đã được xác nhận. Đang chuyển đến lịch sử đơn hàng...");
-            setTimeout(() => {
-              setShowPaymentModal(false);
-              router.push("/orders");
-            }, 1200);
-          } else {
-            setSimulationStatusMessage("Thanh toán đã được ghi nhận. Hệ thống đang tiếp tục đồng bộ trạng thái đơn hàng.");
-          }
-        } else {
-          setSimulationStatusMessage("Thanh toán thất bại. Đơn hàng đã bị hủy.");
-        }
-        return;
-      } else {
-        throw new Error("Không nhận được phản hồi thành công từ simulator");
-      }
-    } catch (error) {
-      setSimulationStatusMessage(
-        `⚠️ Lỗi giả lập: ${error instanceof Error ? error.message : "Không rõ nguyên nhân"}`
-      );
-    } finally {
-      setSimulatingPayment(null);
-    }
-  }
-
   async function placeOrder() {
     if (cartItems.length === 0 || checkoutLockRef.current) return;
 
@@ -207,6 +175,7 @@ export default function CartPage() {
     setCreatedOrder(null);
     setSepayIntentData(null);
     setSimulationStatusMessage(null);
+    paymentRedirectedRef.current = false;
 
     try {
       const user = getStoredUser();
@@ -550,19 +519,10 @@ export default function CartPage() {
                   >
                     Đóng
                   </Button>
-                  {sepayIntentData?.payment && (
-                    <Button
-                      onClick={() => handleSimulatePayment("SUCCESS")}
-                      disabled={simulatingPayment !== null}
-                    >
-                      {simulatingPayment === "SUCCESS" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4" />
-                      )}
-                      Tôi đã thanh toán
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang chờ xác nhận thanh toán tự động
+                  </div>
                   <Button asChild>
                     <Link href="/orders">
                       Xem Lịch sử đơn hàng →

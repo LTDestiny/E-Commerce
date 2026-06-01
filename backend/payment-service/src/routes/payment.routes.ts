@@ -4,6 +4,7 @@
 
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
+import Redis from "ioredis";
 import {
   IEventBus,
   IEventStore,
@@ -15,6 +16,16 @@ import {
 } from "@ecommerce/shared";
 import { paymentRepository } from "../models/payment.repository";
 import { config } from "../config";
+
+const redisPublisher = new Redis(config.redis.url);
+
+async function broadcastPaymentEvent(channel: string, event: unknown) {
+  try {
+    await redisPublisher.publish(channel, JSON.stringify(event));
+  } catch (error) {
+    console.warn("[PaymentService] Failed to broadcast realtime payment event:", error);
+  }
+}
 
 function serviceHeaders(clientHeaders?: any): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -515,6 +526,7 @@ export function createPaymentRoutes(
 
         await eventStore.append(processedEvent);
         await eventBus.publish(EVENT_CHANNELS.PAYMENT_PROCESSED, processedEvent);
+        await broadcastPaymentEvent("payments.events", processedEvent);
         if (updated) {
           await syncOperationalStatusAfterPayment(
             updated,
@@ -553,6 +565,7 @@ export function createPaymentRoutes(
 
       await eventStore.append(failedEvent);
       await eventBus.publish(EVENT_CHANNELS.PAYMENT_FAILED, failedEvent);
+      await broadcastPaymentEvent("payments.events", failedEvent);
       if (updated) {
         await syncOperationalStatusAfterPayment(
           updated,

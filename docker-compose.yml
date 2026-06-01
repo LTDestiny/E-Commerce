@@ -295,11 +295,14 @@ services:
     labels: *watchdog-labels
     ports:
       - "4005:4005"
+    env_file:
+      - ./backend/notification-service/.env
     environment:
       PORT: 4005
       REDIS_URL: redis://redis:6379
       CORS_ORIGIN: http://47.129.201.126:3000,http://47.129.201.126,http://localhost:3000
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/notification_db
+      AUTH_SERVICE_URL: http://auth-service:4006
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_CLIENT_ID: notification-service
     restart: unless-stopped

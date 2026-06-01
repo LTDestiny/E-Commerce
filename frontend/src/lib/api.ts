@@ -554,7 +554,7 @@ export interface StoredEvent {
 export interface AIChatPayload {
   session_id: string;
   message: string;
-  cart_items?: any[];
+  cart_items?: Array<Record<string, unknown>>;
 }
 
 export interface AgentAction {

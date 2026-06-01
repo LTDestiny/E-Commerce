@@ -17,6 +17,36 @@ import {
 import { notificationRepository } from "../models/notification.repository";
 import { config } from "../config";
 import { IdempotencyStore, RedisIdempotencyStore } from "@ecommerce/shared";
+import { renderPaymentSuccessEmail, sendEmail } from "../lib/mailer";
+
+type CustomerContact = {
+  id: string;
+  name?: string;
+  email?: string;
+};
+
+async function fetchCustomerContact(customerId: string): Promise<CustomerContact | null> {
+  try {
+    const res = await fetch(`${config.services.auth}/api/users/${customerId}`, {
+      headers: {
+        "x-user-id": "notification-service",
+        "x-user-email": "notification-service@internal.local",
+        "x-user-role": "ADMIN",
+        "x-user-name": encodeURIComponent("Notification Service"),
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`[${config.serviceName}] Failed to fetch customer ${customerId}: ${res.status}`);
+      return null;
+    }
+
+    return (await res.json()) as CustomerContact;
+  } catch (error) {
+    console.warn(`[${config.serviceName}] Customer lookup failed for ${customerId}:`, error);
+    return null;
+  }
+}
 
 export function registerEventHandlers(
   eventBus: IEventBus,
@@ -175,7 +205,7 @@ export function registerEventHandlers(
     },
   );
 
-  // ----- Listen: Payment Processed → Send in-app success notification -----
+  // ----- Listen: Payment Processed → Send email + in-app success notification -----
   eventBus.subscribe(
     EVENT_CHANNELS.PAYMENT_PROCESSED,
     async (event: DomainEvent) => {
@@ -183,7 +213,7 @@ export function registerEventHandlers(
       await eventStore.append(event);
 
       try {
-        const { orderId } = event.payload;
+        const { orderId, amount, transactionId } = event.payload;
         const customerId = String(event.metadata?.customerId || "");
 
         if (!customerId) {
@@ -209,6 +239,33 @@ export function registerEventHandlers(
         } catch (fetchErr) {
           console.error(`[${config.serviceName}] Failed to fetch order details for ${orderId}:`, fetchErr);
         }
+
+        const customer = await fetchCustomerContact(customerId);
+        if (!customer?.email) {
+          throw new Error(`Cannot send payment success email: customer email not found for ${customerId}`);
+        }
+
+        await sendNotification(
+          orderId,
+          customerId,
+          NotificationType.EMAIL,
+          "Thanh toán thành công",
+          `Thanh toán thành công cho đơn hàng ${orderCode}. Số tiền: ${amount.toLocaleString("vi-VN")} VND. Mã giao dịch: ${transactionId}.`,
+          event.correlationId,
+          eventBus,
+          eventStore,
+          idempotencyStore,
+          {
+            recipientEmail: customer.email,
+            emailHtml: renderPaymentSuccessEmail({
+              customerName: customer.name,
+              orderCode,
+              orderId,
+              amount,
+              transactionId,
+            }),
+          },
+        );
 
         await sendNotification(
           orderId,
@@ -244,8 +301,12 @@ async function sendNotification(
   eventBus: IEventBus,
   eventStore: IEventStore,
   idempotencyStore: any,
+  delivery?: {
+    recipientEmail?: string;
+    emailHtml?: string;
+  },
 ): Promise<void> {
-  const idempotencyKey = `notification-${orderId}-${correlationId}`;
+  const idempotencyKey = `notification-${type}-${orderId}-${correlationId}-${subject}`;
   if (await idempotencyStore.check(idempotencyKey)) {
     console.log(
       `[${config.serviceName}] Duplicate notification for ${orderId} (corr=${correlationId}) - skipped`,
@@ -260,11 +321,26 @@ async function sendNotification(
     300,
   );
 
-  // Simulate sending (in production: use email/SMS/push service)
-  await notificationRepository.updateStatus(
-    notification.id,
-    NotificationStatus.SENT,
-  );
+  try {
+    if (type === NotificationType.EMAIL && delivery?.recipientEmail) {
+      await sendEmail(
+        delivery.recipientEmail,
+        subject,
+        delivery?.emailHtml || `<p>${body}</p>`,
+      );
+    }
+
+    await notificationRepository.updateStatus(
+      notification.id,
+      NotificationStatus.SENT,
+    );
+  } catch (error) {
+    await notificationRepository.updateStatus(
+      notification.id,
+      NotificationStatus.FAILED,
+    );
+    throw error;
+  }
 
   const sentEvent = createEvent<NotificationSentEvent>(
     "NOTIFICATION_SENT",

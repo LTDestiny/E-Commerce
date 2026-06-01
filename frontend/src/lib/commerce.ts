@@ -19,15 +19,31 @@ export type ProductMeta = {
   image?: string;
 };
 
+type InventoryCatalogItem = {
+  productId?: string;
+  productName?: string;
+  price?: number;
+  category?: string;
+  shortDescription?: string;
+  availableStock?: number;
+  description?: string;
+  specs?: unknown;
+  accentClass?: string;
+  rating?: number;
+  sold?: number;
+  warranty?: string;
+  image?: string;
+};
+
 export async function fetchCatalogProducts(): Promise<ProductMeta[]> {
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
   const response = await fetch(`${apiBase}/api/inventory`);
   if (!response.ok) return [];
-  const inventory = (await response.json()) as any[];
+  const inventory = (await response.json()) as InventoryCatalogItem[];
   return inventory.map((item) => {
     return {
-      id: item.productId,
-      name: item.productName,
+      id: item.productId ?? "",
+      name: item.productName ?? "Sản phẩm",
       price: item.price ?? 150000,
       category: item.category ?? "Linh kiện",
       shortDescription: item.shortDescription ?? `Tồn kho còn ${item.availableStock}`,

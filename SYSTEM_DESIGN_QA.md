@@ -85,6 +85,109 @@ Bằng chứng:
 | Notification handler | `backend/notification-service/src/handlers/notification.handler.ts` |
 | Event types | `backend/shared/src/types/events.ts` |
 
+### 2.1. Các design patterns đang sử dụng
+
+Trả lời ngắn:
+
+Dự án không chỉ dùng một pattern đơn lẻ mà kết hợp nhiều pattern phù hợp với microservices: API Gateway/Proxy để gom entrypoint, Event-Driven Pub/Sub để tách service, Saga Choreography để điều phối order workflow, Repository để tách data access, Circuit Breaker để chống lỗi dây chuyền, Idempotency để tránh xử lý trùng request/event, Event Store để audit/replay, và Dead Letter Queue để giữ lại event lỗi sau khi retry thất bại.
+
+Bằng chứng:
+
+| Pattern | Đang dùng ở đâu | Vai trò |
+| --- | --- | --- |
+| API Gateway | `backend/api-gateway/src/index.ts` | Gateway xác thực JWT, rate limit, proxy request tới service nội bộ. |
+| Proxy / Reverse Proxy | `nginx/default.conf`, `http-proxy-middleware` trong gateway | Nginx nhận traffic ngoài, gateway proxy tới từng service. |
+| Event-Driven / Pub-Sub / Observer | `backend/shared/src/events/event-bus.ts`, `backend/shared/src/types/events.ts` | Service publish/subscribe event qua Kafka/Redis theo topic/channel. |
+| Saga Pattern - choreography | `backend/order-service/src/handlers/order.handler.ts` | Order nghe `STOCK_RESERVED`, `PAYMENT_PROCESSED`, failure event để confirm/cancel order. |
+| Compensating Transaction | `cancelOrder()` trong `backend/order-service/src/handlers/order.handler.ts`, refund/release flow ở payment/inventory | Khi payment hoặc stock lỗi, hệ thống phát event bù để rollback nghiệp vụ. |
+| Repository Pattern | `backend/*-service/src/models/*.repository.ts` | Route/handler không gọi Prisma trực tiếp mà đi qua repository. |
+| Singleton | `backend/*-service/src/lib/prisma.ts` | Mỗi service dùng một Prisma client dùng chung, tránh tạo connection lặp. |
+| Circuit Breaker | `backend/api-gateway/src/index.ts`, `backend/shared/src/utils/index.ts`, `backend/payment-service/src/handlers/payment.handler.ts` | Ngắt tạm thời khi upstream/external gateway lỗi liên tục. |
+| Middleware | Auth/rate limit/idempotency trong gateway và service routes | Tách logic xác thực, phân quyền, rate limit, idempotency khỏi business handler. |
+| Adapter/Abstraction | `IEventBus`, `KafkaEventBus`, `RedisEventBus` trong `backend/shared/src/events/event-bus.ts` | Service phụ thuộc interface event bus, có thể đổi Redis/Kafka mà ít đổi business code. |
+| Factory/Helper | `createEvent()` trong `backend/shared/src/events/event-bus.ts` | Chuẩn hóa event id, type, source, timestamp, correlationId. |
+| Event Store | `backend/shared/src/events/event-store.ts`, `backend/*-service/src/lib/event-store.ts` | Lưu event để audit, xem timeline, có nền tảng replay. |
+| Dead Letter Queue | `sendToDlq()`, `publishToDlq()` trong `backend/shared/src/events/event-bus.ts` | Event xử lý lỗi sau retry được đưa vào topic/channel DLQ. |
+
+Câu hỏi thực tế:
+
+**Pattern quan trọng nhất trong luồng đặt hàng là gì?**  
+Saga Choreography kết hợp Event-Driven. Order Service không gọi cứng Inventory, Payment, Shipping theo chuỗi đồng bộ. Thay vào đó Order phát `ORDER_PLACED`; Inventory, Payment, Shipping, Notification tự xử lý và phát event tiếp theo. Order handler nghe các event thành công/thất bại để chuyển trạng thái.
+
+**Vì sao cần Repository Pattern?**  
+Repository giúp cô lập logic truy cập database. Route/handler chỉ nói về nghiệp vụ như tạo order, reserve stock, update payment status; chi tiết Prisma nằm trong `*.repository.ts`. Khi đổi query hoặc thêm transaction/index, phạm vi sửa nhỏ hơn.
+
+### 2.2. CQRS trong dự án
+
+Trả lời ngắn:
+
+Dự án đang áp dụng CQRS ở mức logic service/API, chưa phải CQRS production đầy đủ với hai database read/write tách biệt. Command là các API thay đổi trạng thái và phát event, ví dụ tạo order, cập nhật payment, reserve stock. Query là các API đọc danh sách, chi tiết, thống kê, timeline. Việc tách command/query giúp code rõ trách nhiệm hơn và phù hợp với event-driven workflow.
+
+Bằng chứng:
+
+| CQRS | Ví dụ trong source | Giải thích |
+| --- | --- | --- |
+| Command - tạo order | `POST /api/orders` trong `backend/order-service/src/routes/order.routes.ts` | Ghi order `PENDING`, append event store, publish `ORDER_PLACED`. |
+| Command - xử lý event | `backend/inventory-service/src/handlers/inventory.handler.ts`, `backend/payment-service/src/handlers/payment.handler.ts` | Consumer nhận event và cập nhật state nghiệp vụ. |
+| Command - admin update status | `PATCH /api/orders/:id/status` trong `order.routes.ts` | Thay đổi trạng thái order và đồng bộ payment/shipping liên quan. |
+| Query - list/detail order | `GET /api/orders`, `GET /api/orders/:id` trong `order.routes.ts` | Chỉ đọc dữ liệu từ repository, không phát event. |
+| Query - stats | `getStats()` trong `backend/order-service/src/models/order.repository.ts` | Tối ưu cho đọc thống kê. |
+| Query - event timeline | `GET /api/orders/:id/events` trong `order.routes.ts` | Đọc event store để hiển thị timeline xử lý đơn hàng. |
+
+Khi bảo vệ nên nói rõ:
+
+Hiện tại CQRS tách theo intent và code path: write path xử lý command/event, read path xử lý query. Hệ thống chưa tách riêng read model database như Elasticsearch/read replica/materialized view. Nếu lên production hoặc traffic đọc lớn, có thể mở rộng bằng read model riêng cho order summary, dashboard và tracking timeline.
+
+### 2.3. Event Sourcing trong dự án
+
+Trả lời ngắn:
+
+Dự án có Event Store và lưu domain event cho audit/timeline/replay foundation, nhưng chưa phải full Event Sourcing tuyệt đối. Trạng thái hiện tại của order/payment/inventory vẫn được lưu trong PostgreSQL qua repository. Event store đóng vai trò audit log và nguồn lịch sử sự kiện; nếu cần production-grade event sourcing thì phải đảm bảo mọi state có thể rebuild hoàn toàn từ event stream, version event schema và snapshot.
+
+Bằng chứng:
+
+| Thành phần | Nơi chứng minh | Vai trò |
+| --- | --- | --- |
+| Interface event store | `backend/shared/src/events/event-store.ts` | Có `append`, `getEvents`, `getEventsByType`, `getAllEvents`. |
+| Prisma event store | `backend/*-service/src/lib/event-store.ts` | Lưu event vào PostgreSQL theo từng service. |
+| Append khi tạo order | `eventStore.append(event)` trong `backend/order-service/src/routes/order.routes.ts` | Ghi `ORDER_PLACED` trước/sau khi publish event. |
+| Append khi consume event | `eventStore.append(event)` trong `backend/*-service/src/handlers/*.handler.ts` | Mỗi service lưu event đã xử lý để audit. |
+| Timeline API | `GET /api/orders/:id/events` trong `order.routes.ts` | Cho frontend/admin xem lịch sử xử lý order. |
+
+Câu hỏi thực tế:
+
+**Event Sourcing khác Event Store/Audit Log thế nào?**  
+Event Store/Audit Log chỉ lưu lại lịch sử sự kiện để tra cứu. Full Event Sourcing xem event là nguồn dữ liệu chính: state hiện tại được rebuild bằng cách replay event. Dự án hiện dùng hướng hybrid: state chính vẫn ở PostgreSQL, event store phục vụ audit/timeline và là nền tảng để mở rộng replay.
+
+**Vì sao không dùng full Event Sourcing ngay?**  
+Full Event Sourcing tăng độ phức tạp: cần event versioning, snapshot, migration event schema, replay idempotent và xử lý projection. Với scope đồ án, hybrid event store đủ để chứng minh event-driven, audit và timeline mà vẫn dễ vận hành.
+
+### 2.4. Dead Letter Queue
+
+Trả lời ngắn:
+
+Dead Letter Queue dùng để không làm mất event khi handler xử lý lỗi nhiều lần. EventBus retry handler với exponential backoff; nếu vẫn lỗi sau số lần retry cấu hình, event được đưa vào DLQ để dev/admin kiểm tra, sửa lỗi rồi reprocess thủ công hoặc bằng job riêng.
+
+Bằng chứng:
+
+| Cơ chế | Nơi chứng minh |
+| --- | --- |
+| Retry handler Kafka | `handleWithRetry()` trong `KafkaEventBus` tại `backend/shared/src/events/event-bus.ts` |
+| Kafka DLQ topic | `sendToDlq()` gửi tới topic `<topic>.dlq` |
+| Retry handler Redis | `handleWithRetry()` trong `RedisEventBus` |
+| Redis DLQ channel | `publishToDlq()` gửi tới channel `dlq:<channel>` |
+| Config retry Kafka | `KAFKA_MAX_RETRIES`, `KAFKA_RETRY_BASE_MS` |
+| Config retry Redis | `REDIS_EVENT_MAX_RETRIES`, `REDIS_EVENT_RETRY_BASE_MS`, `REDIS_DLQ_PREFIX` |
+| Tài liệu Kafka/DLQ | `backend/shared/README.kafka.md` |
+
+Câu hỏi thực tế:
+
+**Nếu Inventory handler lỗi khi xử lý `ORDER_PLACED` thì sao?**  
+EventBus retry theo cấu hình. Nếu lỗi tạm thời như timeout DB/Redis thì retry có thể thành công. Nếu lỗi logic hoặc dữ liệu hỏng khiến retry vẫn fail, event được đưa vào DLQ. Khi đó order có thể ở trạng thái pending/failed tùy flow, và admin/dev cần đọc DLQ, sửa nguyên nhân, rồi reprocess event.
+
+**DLQ có thay thế monitoring không?**  
+Không. DLQ chỉ giữ lại message lỗi để không mất dữ liệu. Production vẫn cần alert khi DLQ tăng, dashboard theo số lượng DLQ, tool replay và quy trình xử lý thủ công.
+
 ## 3. Ưu điểm và nhược điểm của kiến trúc
 
 Ưu điểm:
@@ -196,7 +299,7 @@ Inventory cache là ví dụ rõ nhất. Key có dạng `inventory:product:<prod
 
 Trả lời ngắn:
 
-Hệ thống chịu lỗi bằng các lớp: retry health check 3s/5s, timeout khi gọi service, circuit breaker, Docker healthcheck, watchdog restart, event-driven để giảm coupling giữa các service.
+Hệ thống chịu lỗi bằng các lớp: retry health check 3s/5s, timeout khi gọi service, circuit breaker, Docker healthcheck, watchdog restart, event-driven để giảm coupling giữa các service, idempotency để tránh xử lý trùng, và Dead Letter Queue để giữ lại event lỗi sau khi retry thất bại.
 
 Bằng chứng:
 
@@ -208,6 +311,8 @@ Bằng chứng:
 | Docker healthcheck | `docker-compose.yml` |
 | Watchdog | `ops/docker-watchdog/watchdog.sh` |
 | Kafka event bus | `backend/shared/src/kafka/client.ts` |
+| Event retry + DLQ | `handleWithRetry()`, `sendToDlq()`, `publishToDlq()` trong `backend/shared/src/events/event-bus.ts` |
+| Idempotency | `createIdempotencyMiddleware`, `IdempotencyStore`, `RedisIdempotencyStore` trong `backend/shared/src/utils` |
 
 Câu hỏi thực tế:
 
@@ -216,6 +321,9 @@ Gateway trả `504 UPSTREAM_TIMEOUT`. Sau nhiều lỗi liên tiếp, circuit br
 
 **Nếu service trả HTTP 500 liên tục thì sao?**  
 Gateway tăng failure count. Khi vượt threshold, circuit mở trong một khoảng thời gian để bảo vệ hệ thống khỏi gọi tiếp service đang lỗi.
+
+**Nếu event handler lỗi liên tục thì sao?**  
+EventBus retry handler theo cấu hình. Nếu vẫn lỗi sau số lần retry tối đa, event được gửi vào DLQ (`<topic>.dlq` với Kafka hoặc `dlq:<channel>` với Redis). Nhờ vậy event lỗi không bị mất và có thể được điều tra/reprocess sau.
 
 ## 9. Rate Limiter
 
@@ -423,6 +531,24 @@ Trả lời:
 
 Kafka bền hơn HTTP direct call vì message được lưu trong topic. Tuy nhiên demo dùng 1 broker nên chưa đạt production HA. Production cần multi-broker, replication factor, idempotent handlers và retry/dead-letter topic.
 
+### Hỏi: Dự án có dùng CQRS không?
+
+Trả lời:
+
+Có, ở mức tách command/query theo code path. Các command như `POST /api/orders`, payment webhook, inventory reserve sẽ ghi dữ liệu và phát event. Các query như `GET /api/orders`, `GET /api/orders/:id`, stats và timeline chỉ đọc dữ liệu. Hiện chưa tách read database/write database riêng; nếu traffic lớn có thể thêm read model/materialized view cho order summary và dashboard.
+
+### Hỏi: Dự án có dùng Event Sourcing không?
+
+Trả lời:
+
+Có Event Store cho domain event, audit trail và timeline, nhưng là hybrid/partial event sourcing. Trạng thái hiện tại vẫn được lưu trong PostgreSQL qua repository. Full event sourcing production cần event là source of truth duy nhất, replay để rebuild state, event versioning, snapshot và projection riêng.
+
+### Hỏi: Dead Letter Queue dùng để làm gì?
+
+Trả lời:
+
+DLQ giữ lại event không xử lý được sau khi retry. Trong code, Kafka event lỗi được gửi tới `<topic>.dlq`, Redis event lỗi được gửi tới `dlq:<channel>`. DLQ giúp không mất message và tạo điểm điều tra/reprocess, nhưng production vẫn cần alert, dashboard và quy trình xử lý DLQ.
+
 ### Hỏi: Làm sao tránh đặt hàng trừ kho sai?
 
 Trả lời:
@@ -461,9 +587,13 @@ Không expose trực tiếp các port service như `4000-4007`, `5432`, `6379`, 
 | Advantages/disadvantages | Ưu: scale riêng, fault isolation, event audit. Nhược: phức tạp, eventual consistency, tốn tài nguyên. |
 | Compare architecture | Tốt hơn monolith ở scale/fault isolation, phức tạp hơn. Tốt hơn REST-only cho order workflow async. |
 | Trade-off | Đổi chi phí/độ phức tạp để lấy scalability, maintainability, availability. |
+| Design patterns | API Gateway, Proxy, Pub/Sub, Saga Choreography, Repository, Singleton, Circuit Breaker, Middleware, Adapter, Idempotency, Event Store, DLQ. |
+| CQRS | Tách command/query theo code path: command ghi state và phát event, query chỉ đọc repository/event timeline; chưa tách read/write database riêng. |
+| Event Sourcing | Có event store/audit/timeline, nhưng là hybrid/partial; state hiện tại vẫn lưu trong PostgreSQL. |
+| Dead Letter Queue | EventBus retry handler rồi đưa event lỗi vào Kafka `<topic>.dlq` hoặc Redis `dlq:<channel>`. |
 | Availability | Docker healthcheck, restart policy, watchdog, circuit breaker, health endpoint. |
 | Performance | Redis cache inventory object, Redis rate limit store, Redis AI chat history. |
-| Fault tolerance | Retry health 3s/5s, timeout, circuit breaker, watchdog, event-driven. |
+| Fault tolerance | Retry health 3s/5s, timeout, circuit breaker, watchdog, event-driven, idempotency, DLQ. |
 | Client rate limiter | `frontend/src/lib/api.ts` có client limiter; UI disable double-submit. |
 | Retry 3-5s | `HEALTH_RETRY_DELAYS_MS=3000,5000` ở gateway config/compose. |
 | Server rate limiter | API Gateway dùng `express-rate-limit` + RedisStore; Nginx limit ngoài cùng. |
@@ -473,4 +603,3 @@ Không expose trực tiếp các port service như `4000-4007`, `5432`, `6379`, 
 | Docker Compose | `docker-compose.yml` chạy full stack. |
 | Apply AI | AI tư vấn sản phẩm bằng inventory context. |
 | Agent | Agent action `ADD_TO_CART` tự thêm vào giỏ hàng. |
-
