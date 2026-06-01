@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
 import {
@@ -107,10 +108,23 @@ function ProductsContent() {
             >
               <Card className="h-full rounded-lg py-5">
                 <CardContent className="space-y-4 px-5">
-                  <div
-                    className={`flex aspect-[16/10] items-center justify-center rounded-md bg-gradient-to-br ${product.accentClass}`}
-                  >
-                    <Package className="h-12 w-12 text-white" />
+                  <div className="relative aspect-[16/10] w-full overflow-hidden rounded-md bg-muted">
+                    {product.image ? (
+                      <Image
+                        src={product.image}
+                        alt={product.name}
+                        fill
+                        className="object-cover transition-transform duration-300 hover:scale-105"
+                        sizes="(max-width: 768px) 100vw, 33vw"
+                        unoptimized
+                      />
+                    ) : (
+                      <div
+                        className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${product.accentClass}`}
+                      >
+                        <Package className="h-12 w-12 text-white" />
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-2">

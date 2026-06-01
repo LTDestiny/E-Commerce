@@ -39,18 +39,78 @@ class InventoryRepository {
    * Called once at service startup.
    */
   async seedIfEmpty(): Promise<void> {
-    const products = [] as Array<{
-      productId: string;
-      productName: string;
-      totalStock: number;
-      availableStock: number;
-      lowStockThreshold: number;
-    }>;
-
-    if (products.length === 0) {
-      console.log("[Inventory] No seed data inserted; waiting for real PostgreSQL inventory rows.");
-      return;
-    }
+    const products = [
+      {
+        productId: "PROD-001",
+        productName: "iPhone 15 Pro Max",
+        totalStock: 100,
+        availableStock: 100,
+        lowStockThreshold: 10,
+      },
+      {
+        productId: "PROD-002",
+        productName: "Samsung Galaxy S24 Ultra",
+        totalStock: 80,
+        availableStock: 80,
+        lowStockThreshold: 10,
+      },
+      {
+        productId: "PROD-003",
+        productName: "MacBook Pro M3",
+        totalStock: 50,
+        availableStock: 50,
+        lowStockThreshold: 5,
+      },
+      {
+        productId: "PROD-004",
+        productName: "AirPods Pro 2",
+        totalStock: 200,
+        availableStock: 200,
+        lowStockThreshold: 20,
+      },
+      {
+        productId: "PROD-005",
+        productName: "iPad Air M2",
+        totalStock: 60,
+        availableStock: 60,
+        lowStockThreshold: 8,
+      },
+      {
+        productId: "PROD-006",
+        productName: "Neural Engine Core v2",
+        totalStock: 450,
+        availableStock: 450,
+        lowStockThreshold: 50,
+      },
+      {
+        productId: "PROD-007",
+        productName: "Quantum Cooling Fan",
+        totalStock: 18,
+        availableStock: 18,
+        lowStockThreshold: 20,
+      },
+      {
+        productId: "PROD-008",
+        productName: "High-Density SSD 4TB",
+        totalStock: 30,
+        availableStock: 30,
+        lowStockThreshold: 10,
+      },
+      {
+        productId: "PROD-009",
+        productName: "iPhone 17 Pro Max",
+        totalStock: 25,
+        availableStock: 25,
+        lowStockThreshold: 5,
+      },
+      {
+        productId: "PROD-010",
+        productName: "Premium Headphones Collection",
+        totalStock: 9999,
+        availableStock: 9999,
+        lowStockThreshold: 1,
+      },
+    ];
 
     for (const p of products) {
       await prisma.inventoryItem.upsert({

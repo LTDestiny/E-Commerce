@@ -145,10 +145,23 @@ export default function HomePage() {
             >
               <Card className="h-full rounded-lg py-4">
                 <CardContent className="space-y-4 px-4">
-                  <div
-                    className={`flex aspect-[4/3] items-center justify-center rounded-md bg-gradient-to-br ${product.accentClass}`}
-                  >
-                    <Package className="h-10 w-10 text-white" />
+                  <div className="relative aspect-[4/3] w-full overflow-hidden rounded-md bg-muted">
+                    {product.image ? (
+                      <Image
+                        src={product.image}
+                        alt={product.name}
+                        fill
+                        className="object-cover transition-transform duration-300 hover:scale-105"
+                        sizes="(max-width: 768px) 100vw, 25vw"
+                        unoptimized
+                      />
+                    ) : (
+                      <div
+                        className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${product.accentClass}`}
+                      >
+                        <Package className="h-10 w-10 text-white" />
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
