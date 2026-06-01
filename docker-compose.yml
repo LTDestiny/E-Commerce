@@ -381,6 +381,6 @@ services:
       - frontend
       - api-gateway
     restart: unless-stopped
-  volumes:
+volumes:
   redis-data:
   postgres-data:
