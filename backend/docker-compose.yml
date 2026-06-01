@@ -330,8 +330,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      inventory-service:
-        condition: service_healthy
     healthcheck:
       test:
         [
