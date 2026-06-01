@@ -17,6 +17,16 @@ export interface InventoryItem {
   availableStock: number;
   lowStockThreshold: number;
   updatedAt: string;
+  price?: number;
+  category?: string;
+  shortDescription?: string;
+  description?: string;
+  specs?: string[];
+  accentClass?: string;
+  rating?: number;
+  sold?: number;
+  warranty?: string;
+  image?: string;
 }
 
 export interface StockReservation {

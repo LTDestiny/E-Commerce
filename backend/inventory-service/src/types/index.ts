@@ -14,6 +14,16 @@ export type InventoryItemRow = {
   availableStock: number;
   lowStockThreshold: number;
   updatedAt: Date;
+  price?: number | null;
+  category?: string | null;
+  shortDescription?: string | null;
+  description?: string | null;
+  specs?: any | null;
+  accentClass?: string | null;
+  rating?: number | null;
+  sold?: number | null;
+  warranty?: string | null;
+  image?: string | null;
 };
 
 /** Raw row returned by Prisma for the StockReservation model. */

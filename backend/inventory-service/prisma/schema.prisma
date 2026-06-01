@@ -20,6 +20,17 @@ model InventoryItem {
   lowStockThreshold Int      @default(10)
   updatedAt         DateTime @updatedAt
 
+  price             Float?   @default(150000)
+  category          String?  @default("Linh kiện")
+  shortDescription  String?  @default("Mô tả ngắn sản phẩm.")
+  description       String?  @default("Mô tả chi tiết sản phẩm.")
+  specs             Json?    @default("[]")
+  accentClass       String?  @default("from-slate-800 to-slate-500")
+  rating            Float?   @default(4.5)
+  sold              Int?     @default(10)
+  warranty          String?  @default("12 tháng chính hãng")
+  image             String?
+
   @@map("inventory_items")
 }
 

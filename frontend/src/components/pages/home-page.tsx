@@ -16,8 +16,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { PRODUCT_CATALOG, STORE, formatVND } from "@/lib/commerce";
+import { fetchCatalogProducts, STORE, formatVND, type ProductMeta } from "@/lib/commerce";
 import { addToCart } from "@/lib/cart";
+import { useEffect, useState } from "react";
 
 const categories = [
   { label: "Điện thoại", icon: Smartphone },
@@ -26,7 +27,15 @@ const categories = [
 ];
 
 export default function HomePage() {
-  const featured = PRODUCT_CATALOG.slice(0, 4);
+  const [featured, setFeatured] = useState<ProductMeta[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchCatalogProducts().then((res) => {
+      setFeatured(res.slice(0, 4));
+      setLoading(false);
+    });
+  }, []);
 
   return (
     <div className="space-y-12">
@@ -136,56 +145,70 @@ export default function HomePage() {
           </Button>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {featured.map((product, index) => (
-            <motion.div
-              key={product.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <Card className="h-full rounded-lg py-4">
+          {loading ? (
+            [...Array(4)].map((_, i) => (
+              <Card key={i} className="h-full rounded-lg py-4 animate-pulse">
                 <CardContent className="space-y-4 px-4">
-                  <div className="relative aspect-[4/3] w-full overflow-hidden rounded-md bg-muted">
-                    {product.image ? (
-                      <Image
-                        src={product.image}
-                        alt={product.name}
-                        fill
-                        className="object-cover transition-transform duration-300 hover:scale-105"
-                        sizes="(max-width: 768px) 100vw, 25vw"
-                        unoptimized
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${product.accentClass}`}
-                      >
-                        <Package className="h-10 w-10 text-white" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <Badge variant="outline">{product.category}</Badge>
-                      <span className="text-xs text-muted-foreground">
-                        ★ {product.rating}
-                      </span>
-                    </div>
-                    <h3 className="min-h-10 text-sm font-semibold leading-5">
-                      {product.name}
-                    </h3>
-                    <p className="font-bold">{formatVND(product.price)}</p>
-                    <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                      {product.shortDescription}
-                    </p>
-                  </div>
-                  <Button className="w-full" onClick={() => addToCart(product.id)}>
-                    <ShoppingCart className="h-4 w-4" />
-                    Thêm vào giỏ
-                  </Button>
+                  <div className="aspect-[4/3] w-full rounded-md bg-muted" />
+                  <div className="h-4 bg-muted rounded w-1/3" />
+                  <div className="h-5 bg-muted rounded w-3/4" />
+                  <div className="h-4 bg-muted rounded w-1/2" />
+                  <div className="h-8 bg-muted rounded w-full" />
                 </CardContent>
               </Card>
-            </motion.div>
-          ))}
+            ))
+          ) : (
+            featured.map((product, index) => (
+              <motion.div
+                key={product.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.05 }}
+              >
+                <Card className="h-full rounded-lg py-4">
+                  <CardContent className="space-y-4 px-4">
+                    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-md bg-muted">
+                      {product.image ? (
+                        <Image
+                          src={product.image}
+                          alt={product.name}
+                          fill
+                          className="object-cover transition-transform duration-300 hover:scale-105"
+                          sizes="(max-width: 768px) 100vw, 25vw"
+                          unoptimized
+                        />
+                      ) : (
+                        <div
+                          className={`flex h-full w-full items-center justify-center bg-gradient-to-br ${product.accentClass}`}
+                        >
+                          <Package className="h-10 w-10 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <Badge variant="outline">{product.category}</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          ★ {product.rating}
+                        </span>
+                      </div>
+                      <h3 className="min-h-10 text-sm font-semibold leading-5">
+                        {product.name}
+                      </h3>
+                      <p className="font-bold">{formatVND(product.price)}</p>
+                      <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
+                        {product.shortDescription}
+                      </p>
+                    </div>
+                    <Button className="w-full" onClick={() => addToCart(product.id)}>
+                      <ShoppingCart className="h-4 w-4" />
+                      Thêm vào giỏ
+                    </Button>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))
+          )}
         </div>
       </section>
     </div>

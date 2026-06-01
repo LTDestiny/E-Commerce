@@ -95,15 +95,8 @@ async function fetchInventoryProducts(): Promise<any[]> {
     }
     return (await res.json()) as any[];
   } catch (error) {
-    console.error("[RAG Error] Lấy dữ liệu kho thất bại, sử dụng danh sách sản phẩm dự phòng:", error);
-    // Trả về dữ liệu sản phẩm mặc định làm fallback nếu service kho offline
-    return [
-      { productId: "PROD-001", productName: "iPhone 15 Pro Max", availableStock: 10, price: 29000000 },
-      { productId: "PROD-002", productName: "Samsung Galaxy S24 Ultra", availableStock: 5, price: 26000000 },
-      { productId: "PROD-003", productName: "MacBook Pro M3", availableStock: 8, price: 39000000 },
-      { productId: "PROD-004", productName: "AirPods Pro 2", availableStock: 15, price: 5000000 },
-      { productId: "PROD-005", productName: "iPad Air M2", availableStock: 12, price: 15000000 }
-    ];
+    console.error("[RAG Error] Lấy dữ liệu kho thất bại, trả về danh sách trống:", error);
+    return [];
   }
 }
 
@@ -114,26 +107,20 @@ const BUY_INTENT_KEYWORDS = [
   "add", "thêm", "bỏ vào giỏ"
 ];
 
-// Map từ khoá sản phẩm sang productId
-const PRODUCT_KEYWORD_MAP: Array<{ keywords: string[]; productId: string; productName: string }> = [
-  { keywords: ["iphone", "iphone 15", "iphone 15 pro", "iphone 15 pro max"], productId: "PROD-001", productName: "iPhone 15 Pro Max" },
-  { keywords: ["samsung", "galaxy", "s24", "s24 ultra", "samsung galaxy"], productId: "PROD-002", productName: "Samsung Galaxy S24 Ultra" },
-  { keywords: ["macbook", "macbook pro", "macbook m3", "mac"], productId: "PROD-003", productName: "MacBook Pro M3" },
-  { keywords: ["airpods", "airpods pro", "tai nghe", "airpods pro 2"], productId: "PROD-004", productName: "AirPods Pro 2" },
-  { keywords: ["ipad", "ipad air", "ipad m2", "ipad air m2", "máy tính bảng"], productId: "PROD-005", productName: "iPad Air M2" },
-];
-
-function detectBuyIntent(message: string): { hasBuyIntent: boolean; productId?: string; productName?: string; quantity: number } {
+function detectBuyIntent(message: string, dbProducts: any[]): { hasBuyIntent: boolean; productId?: string; productName?: string; quantity: number } {
   const msgLower = message.toLowerCase();
   const hasBuyIntent = BUY_INTENT_KEYWORDS.some(kw => msgLower.includes(kw));
 
   if (!hasBuyIntent) return { hasBuyIntent: false, quantity: 1 };
 
-  // Nhận diện sản phẩm từ message
+  // Nhận diện sản phẩm từ message dựa trên dbProducts thực tế từ database
   let matchedProduct: { productId: string; productName: string } | undefined;
-  for (const entry of PRODUCT_KEYWORD_MAP) {
-    if (entry.keywords.some(kw => msgLower.includes(kw))) {
-      matchedProduct = { productId: entry.productId, productName: entry.productName };
+  for (const product of dbProducts) {
+    const nameLower = product.productName.toLowerCase();
+    const words = nameLower.split(/\s+/).filter((w: string) => w.length > 2);
+    const matchesName = nameLower.split(" ").every((word: string) => msgLower.includes(word)) || msgLower.includes(nameLower) || words.some((w: string) => msgLower.includes(w) && (nameLower.includes("iphone") || nameLower.includes("samsung") || nameLower.includes("macbook") || nameLower.includes("airpods") || nameLower.includes("ipad")));
+    if (matchesName) {
+      matchedProduct = { productId: product.productId, productName: product.productName };
       break;
     }
   }
@@ -153,7 +140,7 @@ function generateMockResponse(message: string, dbProducts: any[]): { bot_respons
   let agent_action: any = { type: "NONE" };
 
   // Kiểm tra ý định mua hàng trước
-  const buyIntent = detectBuyIntent(message);
+  const buyIntent = detectBuyIntent(message, dbProducts);
   if (buyIntent.hasBuyIntent && buyIntent.productId) {
     selectedProducts = dbProducts.filter(p => p.productId !== buyIntent.productId).slice(0, 2);
     responseText = `Dạ, Destiny đã thêm ${buyIntent.quantity} ${buyIntent.productName} vào giỏ hàng của quý khách rồi ạ! 🛒 Quý khách có muốn tham khảo thêm phụ kiện đi kèm không ạ?`;

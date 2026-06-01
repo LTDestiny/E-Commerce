@@ -129,8 +129,8 @@ export default function CartPage() {
     };
   }, [syncCart]);
 
-  const cartItems = useMemo(() => getCartItems(cart), [cart]);
-  const cartTotal = useMemo(() => getCartTotal(cart), [cart]);
+  const cartItems = useMemo(() => getCartItems(cart, inventory), [cart, inventory]);
+  const cartTotal = useMemo(() => getCartTotal(cart, inventory), [cart, inventory]);
   const stockById = useMemo(
     () => new Map(inventory.map((item) => [item.productId, item])),
     [inventory],
@@ -195,7 +195,7 @@ export default function CartPage() {
       };
 
       const order = await ordersApi.create(payload);
-      
+
       // Save order details to show in modal
       setCreatedOrder(order);
 
@@ -472,7 +472,7 @@ export default function CartPage() {
                 {/* Right Column: QR Code & Webhook Simulator */}
                 <div className="flex flex-col items-center justify-center space-y-4 rounded-xl border border-dashed border-muted-foreground/30 bg-muted/10 p-4">
                   <h4 className="text-sm font-bold text-foreground">Quét QR chuyển khoản (SePay)</h4>
-                  
+
                   {sepayIntentData?.qrPayload ? (
                     <div className="relative overflow-hidden rounded-lg border-4 border-white shadow-md bg-white p-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
