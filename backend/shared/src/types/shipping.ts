@@ -4,13 +4,12 @@
 
 export enum ShippingStatus {
   PENDING = "PENDING",
-  SCHEDULED = "SCHEDULED",
-  PICKED_UP = "PICKED_UP",
+  READY = "READY",
   IN_TRANSIT = "IN_TRANSIT",
-  OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY",
+  DELAYED = "DELAYED",
   DELIVERED = "DELIVERED",
   FAILED = "FAILED",
-  RETURNED = "RETURNED",
+  CANCELLED = "CANCELLED",
 }
 
 export enum ShippingCarrier {

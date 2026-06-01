@@ -39,7 +39,7 @@ class ShipmentRepository {
       data: {
         orderId,
         carrier,
-        status: ShippingStatus.SCHEDULED,
+        status: ShippingStatus.READY,
         estimatedDelivery,
         shippingAddress: shippingAddress as object,
       },

@@ -16,11 +16,159 @@ import {
 import { paymentRepository } from "../models/payment.repository";
 import { config } from "../config";
 
+function serviceHeaders(clientHeaders?: any): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!clientHeaders) return headers;
+  if (clientHeaders["x-user-id"]) headers["x-user-id"] = String(clientHeaders["x-user-id"]);
+  if (clientHeaders["x-user-email"]) headers["x-user-email"] = String(clientHeaders["x-user-email"]);
+  if (clientHeaders["x-user-role"]) headers["x-user-role"] = String(clientHeaders["x-user-role"]);
+  if (clientHeaders["x-user-name"]) headers["x-user-name"] = String(clientHeaders["x-user-name"]);
+  return headers;
+}
+
+async function fetchOrder(orderId: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-order-service:4001/api/orders/${orderId}`,
+    `http://order-service:4001/api/orders/${orderId}`,
+    `http://localhost:4001/api/orders/${orderId}`
+  ];
+
+  const headers = serviceHeaders(clientHeaders);
+
+  for (const url of urls) {
+    try {
+      console.log(`[PaymentService fetchOrder] Fetching URL: ${url} (has x-user-id: ${!!headers["x-user-id"]})`);
+      const res = await fetch(url, { headers });
+      console.log(`[PaymentService fetchOrder] Response status from order-service: ${res.status}`);
+      if (res.ok) {
+        return await res.json();
+      } else {
+        const text = await res.text();
+        console.log(`[PaymentService fetchOrder] Error body: ${text}`);
+      }
+    } catch (e) {
+      console.error(`[PaymentService fetchOrder] Connection error for ${url}:`, e);
+    }
+  }
+  return null;
+}
+
+async function patchOrderStatus(orderId: string, status: string, reason: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-order-service:4001/api/orders/${orderId}/status`,
+    `http://order-service:4001/api/orders/${orderId}/status`,
+    `http://localhost:4001/api/orders/${orderId}/status`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          ...serviceHeaders(clientHeaders),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status, reason }),
+      });
+      if (res.ok) return await res.json();
+      console.warn(`[PaymentService sync] Order ${orderId} -> ${status} failed at ${url}: ${res.status} ${await res.text()}`);
+    } catch (error) {
+      console.warn(`[PaymentService sync] Order status connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function fetchShipmentByOrder(orderId: string): Promise<any> {
+  const urls = [
+    `http://ecommerce-shipping-service:4004/api/shipments/order/${orderId}`,
+    `http://shipping-service:4004/api/shipments/order/${orderId}`,
+    `http://localhost:4004/api/shipments/order/${orderId}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+      if (res.status !== 404) {
+        console.warn(`[PaymentService sync] Shipment lookup ${orderId} failed at ${url}: ${res.status} ${await res.text()}`);
+      }
+    } catch (error) {
+      console.warn(`[PaymentService sync] Shipment lookup connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function patchShipmentStatus(shipmentId: string, status: string, reason: string, clientHeaders?: any): Promise<any> {
+  const urls = [
+    `http://ecommerce-shipping-service:4004/api/shipments/${shipmentId}/status`,
+    `http://shipping-service:4004/api/shipments/${shipmentId}/status`,
+    `http://localhost:4004/api/shipments/${shipmentId}/status`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          ...serviceHeaders(clientHeaders),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status, reason }),
+      });
+      if (res.ok) return await res.json();
+      console.warn(`[PaymentService sync] Shipment ${shipmentId} -> ${status} failed at ${url}: ${res.status} ${await res.text()}`);
+    } catch (error) {
+      console.warn(`[PaymentService sync] Shipment status connection failed at ${url}:`, error);
+    }
+  }
+
+  return null;
+}
+
+async function syncOperationalStatusAfterPayment(payment: any, status: string, reason: string, clientHeaders?: any) {
+  const normalized = status.toUpperCase();
+  if (normalized === "COMPLETED") {
+    await patchOrderStatus(payment.orderId, "CONFIRMED", reason || "Payment captured by admin", clientHeaders);
+    const shipment = await fetchShipmentByOrder(payment.orderId);
+    if (shipment && String(shipment.status || "").toUpperCase() === "PENDING") {
+      await patchShipmentStatus(shipment.id, "READY", "Payment completed, shipment released for processing", clientHeaders);
+    }
+    return;
+  }
+
+  const orderStatusByPaymentStatus: Record<string, string> = {
+    FAILED: "FAILED",
+    CANCELLED: "CANCELLED",
+    REFUNDED: "CANCELLED",
+  };
+  const targetOrderStatus = orderStatusByPaymentStatus[normalized];
+  if (!targetOrderStatus) return;
+
+  await patchOrderStatus(payment.orderId, targetOrderStatus, reason || `Payment ${normalized.toLowerCase()}`, clientHeaders);
+
+  const shipment = await fetchShipmentByOrder(payment.orderId);
+  const shipmentStatus = String(shipment?.status || "").toUpperCase();
+  if (shipment && ["PENDING", "READY"].includes(shipmentStatus) && normalized !== "REFUNDED") {
+    await patchShipmentStatus(shipment.id, normalized === "CANCELLED" ? "CANCELLED" : "FAILED", reason || `Payment ${normalized.toLowerCase()}`, clientHeaders);
+  }
+}
+
 export function createPaymentRoutes(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): Router {
   const router = Router();
+  const transitions: Record<string, string[]> = {
+    PENDING: ["COMPLETED", "FAILED", "CANCELLED"],
+    FAILED: ["PENDING", "CANCELLED"],
+    COMPLETED: ["REFUNDED"],
+    REFUNDED: [],
+    CANCELLED: [],
+  };
 
   // GET /api/payments - List all payments
   router.get("/", async (_req: Request, res: Response) => {
@@ -55,6 +203,74 @@ export function createPaymentRoutes(
         return;
       }
       res.json(payment);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/payments/:id/status - Admin status control
+  router.patch("/:id/status", async (req: Request, res: Response) => {
+    try {
+      if (String(req.headers["x-user-role"] || "") !== "ADMIN") {
+        res.status(403).json({ error: "Admin role is required" });
+        return;
+      }
+
+      const payment = await paymentRepository.findById(req.params.id);
+      if (!payment) {
+        res.status(404).json({ error: "Payment not found" });
+        return;
+      }
+
+      const requestedStatus = String(req.body?.status || "").toUpperCase();
+      const reason = String(req.body?.reason || "").trim();
+      if (!Object.values(PaymentStatus).includes(requestedStatus as PaymentStatus)) {
+        res.status(400).json({ error: "Invalid payment status" });
+        return;
+      }
+
+      const currentStatus = String(payment.status || "PENDING").toUpperCase();
+      if (currentStatus === requestedStatus) {
+        await syncOperationalStatusAfterPayment(
+          payment,
+          requestedStatus,
+          reason || `Payment ${requestedStatus.toLowerCase()} resync via admin status control`,
+          req.headers,
+        );
+        res.json(payment);
+        return;
+      }
+
+      if (!(transitions[currentStatus] || []).includes(requestedStatus)) {
+        res.status(409).json({ error: `Transition ${currentStatus} -> ${requestedStatus} is not allowed` });
+        return;
+      }
+
+      if (["FAILED", "CANCELLED", "REFUNDED"].includes(requestedStatus) && !reason) {
+        res.status(400).json({ error: "Reason is required for sensitive payment status changes" });
+        return;
+      }
+
+      const transactionId =
+        req.body?.transactionId ||
+        payment.transactionId ||
+        (requestedStatus === "COMPLETED" ? `ADMIN-${crypto.randomBytes(5).toString("hex").toUpperCase()}` : undefined);
+
+      const updated = await paymentRepository.updateStatus(
+        payment.id,
+        requestedStatus as PaymentStatus,
+        transactionId,
+        requestedStatus === "COMPLETED" ? new Date() : undefined,
+      );
+      if (updated) {
+        await syncOperationalStatusAfterPayment(
+          updated,
+          requestedStatus,
+          reason || `Payment ${requestedStatus.toLowerCase()} via admin status control`,
+          req.headers,
+        );
+      }
+      res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Internal server error" });
     }
@@ -98,6 +314,62 @@ export function createPaymentRoutes(
     }
   });
 
+  router.post("/sepay/create", async (req: Request, res: Response) => {
+    try {
+      const { orderId } = req.body || {};
+      const customerId = String(req.headers["x-user-id"] || "");
+
+      if (!orderId) {
+        res.status(400).json({ error: "Missing orderId" });
+        return;
+      }
+
+      const order = await fetchOrder(orderId, req.headers);
+      if (!order) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+
+      if (order.customerId !== customerId) {
+        res.status(403).json({ error: "Forbidden: Access denied to this order" });
+        return;
+      }
+
+      if (
+        order.status === "CONFIRMED" ||
+        order.status === "PROCESSING" ||
+        order.status === "COMPLETED"
+      ) {
+        res.status(400).json({ error: "Order is already paid" });
+        return;
+      }
+
+      const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+      const transferContent = `SEPAY ${order.id.slice(0, 8)}`;
+      const qrCode = `https://img.vietqr.io/image/${config.sepay.bankName}-${config.sepay.paymentAccount}-compact2.png?amount=${order.totalAmount}&addInfo=${encodeURIComponent(transferContent)}`;
+      const paymentLink = `https://payment.sepay.vn/t/${order.id}`;
+
+      const payment = await paymentRepository.createSepay(
+        order.id,
+        customerId,
+        order.totalAmount,
+        qrCode,
+        transferContent,
+        expiredAt
+      );
+
+      res.json({
+        qrCode,
+        paymentLink,
+        transferContent,
+        amount: payment.amount,
+        expiredAt: expiredAt.toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create SePay session" });
+    }
+  });
+
   router.post("/sepay/webhook", async (req: Request, res: Response) => {
     try {
       const signature = String(req.header("x-sepay-signature") || "");
@@ -115,54 +387,64 @@ export function createPaymentRoutes(
       }
 
       const payload = JSON.parse(rawBody || "{}");
-      const {
-        orderId,
-        customerId,
-        paymentId,
-        transactionId,
-        amount,
-        status,
-        reason,
-      } = payload || {};
 
-      if (!orderId || !paymentId) {
-        res.status(400).json({ error: "Missing orderId/paymentId" });
+      const amount = Number(payload.transferAmount || payload.amount || 0);
+      const transferContent = String(payload.content || payload.transferContent || payload.code || "").trim();
+      const bankTransactionId = String(payload.id || payload.transactionId || payload.referenceCode || "");
+      const status = String(payload.status || "SUCCESS").toUpperCase();
+
+      if (!bankTransactionId) {
+        res.status(400).json({ error: "Missing bank transaction ID" });
         return;
       }
 
-      const payment = await paymentRepository.findById(paymentId);
+      let payment = null;
+      if (payload.paymentId) {
+        payment = await paymentRepository.findById(payload.paymentId);
+      } else {
+        const payments = await paymentRepository.findAll();
+        payment = payments.find(p => p.transferContent && transferContent.includes(p.transferContent.trim()));
+      }
+
       if (!payment) {
-        res.status(404).json({ error: "Payment not found" });
+        res.status(404).json({ error: "Payment not found matching this transfer content" });
         return;
       }
 
       if (payment.status === PaymentStatus.COMPLETED) {
-        res.json({ ok: true, duplicated: true });
+        res.json({ ok: true, message: "Duplicate callback - already completed", duplicated: true });
         return;
       }
 
-      if (String(status).toUpperCase() === "SUCCESS") {
+      if (status === "SUCCESS" || status === "COMPLETED") {
+        if (amount < payment.amount) {
+          res.status(400).json({ error: `Incorrect amount. Expected ${payment.amount}, received ${amount}` });
+          return;
+        }
+
         const updated = await paymentRepository.updateStatus(
           payment.id,
           PaymentStatus.COMPLETED,
-          transactionId || `SEPAY-${payment.id.slice(0, 8)}`,
+          bankTransactionId,
+          new Date()
         );
 
         const processedEvent = createEvent<PaymentProcessedEvent>(
           "PAYMENT_PROCESSED",
           config.serviceName,
           {
-            orderId,
+            orderId: payment.orderId,
             paymentId: payment.id,
-            amount: Number(amount || payment.amount),
-            transactionId: transactionId || `SEPAY-${payment.id.slice(0, 8)}`,
+            amount: payment.amount,
+            transactionId: bankTransactionId,
           },
           payment.idempotencyKey,
           {
             provider: "SEPAY",
             webhook: true,
-            customerId: customerId || payment.customerId,
+            customerId: payment.customerId,
             status: "SUCCESS",
+            paidAt: new Date().toISOString(),
           },
         );
 
@@ -182,16 +464,16 @@ export function createPaymentRoutes(
         "PAYMENT_FAILED",
         config.serviceName,
         {
-          orderId,
+          orderId: payment.orderId,
           paymentId: payment.id,
-          reason: reason || "SePay webhook reported failure",
+          reason: payload.reason || "SePay webhook reported failure",
           retryable: false,
         },
         payment.idempotencyKey,
         {
           provider: "SEPAY",
           webhook: true,
-          customerId: customerId || payment.customerId,
+          customerId: payment.customerId,
           status: "FAILED",
         },
       );
@@ -202,6 +484,60 @@ export function createPaymentRoutes(
       res.json({ ok: true, payment: updated });
     } catch (error) {
       res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  router.post("/sepay/simulate", async (req: Request, res: Response) => {
+    try {
+      const { paymentId, status } = req.body || {};
+      if (!paymentId) {
+        res.status(400).json({ error: "Missing paymentId" });
+        return;
+      }
+
+      const payment = await paymentRepository.findById(paymentId);
+      if (!payment) {
+        res.status(404).json({ error: "Payment not found" });
+        return;
+      }
+
+      const transactionId = `TXN-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      const payload = {
+        orderId: payment.orderId,
+        customerId: payment.customerId,
+        paymentId: payment.id,
+        transactionId,
+        amount: payment.amount,
+        status: status || "SUCCESS",
+        reason: "Simulated payment via development trigger",
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const signature = crypto
+        .createHmac("sha256", config.sepay.webhookSecret)
+        .update(rawBody)
+        .digest("hex");
+
+      const port = config.port;
+      const webhookUrl = `http://localhost:${port}${config.sepay.webhookPath}`;
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sepay-signature": signature,
+        },
+        body: rawBody,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Webhook simulation failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
     }
   });
 

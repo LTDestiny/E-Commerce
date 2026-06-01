@@ -10,10 +10,12 @@ export enum NotificationType {
 }
 
 export enum NotificationStatus {
+  QUEUED = "QUEUED",
   PENDING = "PENDING",
   SENT = "SENT",
   DELIVERED = "DELIVERED",
   FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
 }
 
 export interface Notification {
@@ -24,6 +26,7 @@ export interface Notification {
   subject: string;
   body: string;
   status: NotificationStatus;
+  isRead?: boolean;
   sentAt?: string;
   createdAt: string;
 }

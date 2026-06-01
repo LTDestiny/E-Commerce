@@ -4,15 +4,11 @@
 
 export enum OrderStatus {
   PENDING = "PENDING",
-  INVENTORY_RESERVED = "INVENTORY_RESERVED",
-  PAYMENT_PROCESSING = "PAYMENT_PROCESSING",
-  PAYMENT_COMPLETED = "PAYMENT_COMPLETED",
   CONFIRMED = "CONFIRMED",
-  SHIPPING_SCHEDULED = "SHIPPING_SCHEDULED",
-  SHIPPED = "SHIPPED",
-  DELIVERED = "DELIVERED",
+  PROCESSING = "PROCESSING",
+  COMPLETED = "COMPLETED",
   CANCELLED = "CANCELLED",
-  REFUNDED = "REFUNDED",
+  FAILED = "FAILED",
 }
 
 export interface OrderItem {
@@ -34,11 +30,13 @@ export interface ShippingAddress {
 
 export interface Order {
   id: string;
+  orderCode?: string;
   customerId: string;
   items: OrderItem[];
   totalAmount: number;
   shippingAddress: ShippingAddress;
   status: OrderStatus;
+  paymentMethod?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,4 +45,5 @@ export interface CreateOrderRequest {
   customerId: string;
   items: OrderItem[];
   shippingAddress: ShippingAddress;
+  paymentMethod?: string;
 }

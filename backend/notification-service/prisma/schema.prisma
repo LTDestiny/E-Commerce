@@ -19,6 +19,7 @@ model Notification {
   subject    String
   body       String
   status     String    @default("PENDING")
+  isRead     Boolean   @default(false)
   sentAt     DateTime?
   createdAt  DateTime  @default(now())
 

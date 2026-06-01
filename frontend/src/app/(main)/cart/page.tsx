@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  CheckCircle2,
   CreditCard,
   Loader2,
   Minus,
@@ -11,6 +13,7 @@ import {
   ShoppingCart,
   Trash2,
   UserRound,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,12 +26,15 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { PageHeader } from "@/components/shared/page-header";
+import { AnimatePresence, motion } from "motion/react";
 import {
   getStoredUser,
   inventoryApi,
   ordersApi,
+  paymentsApi,
   type CreateOrderPayload,
   type InventoryItem,
+  type Order,
 } from "@/lib/api";
 import { createCustomerId, formatVND } from "@/lib/commerce";
 import {
@@ -42,6 +48,8 @@ import {
 } from "@/lib/cart";
 
 const CHECKOUT_COOLDOWN_MS = 3000;
+type SepayIntentResponse = Awaited<ReturnType<typeof paymentsApi.sepayIntent>>;
+
 const DEFAULT_ADDRESS = {
   fullName: "Nguyễn Văn A",
   phone: "0901234567",
@@ -53,6 +61,7 @@ const DEFAULT_ADDRESS = {
 };
 
 export default function CartPage() {
+  const router = useRouter();
   const [cart, setCart] = useState<Cart>({});
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [placing, setPlacing] = useState(false);
@@ -61,6 +70,41 @@ export default function CartPage() {
   const checkoutLockRef = useRef(false);
   const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [customer, setCustomer] = useState(DEFAULT_ADDRESS);
+
+  // States for interactive payment modal and VietQR
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [sepayIntentData, setSepayIntentData] = useState<SepayIntentResponse | null>(null);
+  const [simulatingPayment, setSimulatingPayment] = useState<"SUCCESS" | "FAILED" | null>(null);
+  const [simulationStatusMessage, setSimulationStatusMessage] = useState<string | null>(null);
+
+  // Poll order status when payment modal is open
+  useEffect(() => {
+    if (!showPaymentModal || !createdOrder?.id) return;
+
+    console.log("[CartPage] Starting to poll order status for", createdOrder.id);
+    const interval = setInterval(async () => {
+      try {
+        const order = await ordersApi.get(createdOrder.id);
+        if (
+          order.status === "CONFIRMED" ||
+          order.status === "PROCESSING" ||
+          order.status === "COMPLETED"
+        ) {
+          clearInterval(interval);
+          setSimulationStatusMessage("✅ Thanh toán thành công! Đơn hàng của bạn đã được ghi nhận.");
+          setTimeout(() => {
+            setShowPaymentModal(false);
+            router.push("/orders");
+          }, 3000);
+        }
+      } catch (err) {
+        console.error("Error polling order status:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [showPaymentModal, createdOrder, router]);
 
   const syncCart = useCallback(() => setCart(readCart()), []);
 
@@ -98,12 +142,44 @@ export default function CartPage() {
     writeCart(next);
   }
 
+  async function handleSimulatePayment(status: "SUCCESS" | "FAILED") {
+    if (!sepayIntentData?.payment?.id) return;
+    setSimulatingPayment(status);
+    setSimulationStatusMessage(null);
+
+    try {
+      const response = await paymentsApi.sepaySimulate({
+        paymentId: sepayIntentData.payment.id,
+        status,
+      });
+
+      if (response && response.ok) {
+        setSimulationStatusMessage(
+          status === "SUCCESS"
+            ? "✅ Giả lập thanh toán THÀNH CÔNG! Trạng thái đơn hàng đang được cập nhật."
+            : "❌ Giả lập thanh toán THẤT BẠI! Đơn hàng đã bị hủy."
+        );
+      } else {
+        throw new Error("Không nhận được phản hồi thành công từ simulator");
+      }
+    } catch (error) {
+      setSimulationStatusMessage(
+        `⚠️ Lỗi giả lập: ${error instanceof Error ? error.message : "Không rõ nguyên nhân"}`
+      );
+    } finally {
+      setSimulatingPayment(null);
+    }
+  }
+
   async function placeOrder() {
     if (cartItems.length === 0 || checkoutLockRef.current) return;
 
     checkoutLockRef.current = true;
     setPlacing(true);
     setMessage(null);
+    setCreatedOrder(null);
+    setSepayIntentData(null);
+    setSimulationStatusMessage(null);
 
     try {
       const user = getStoredUser();
@@ -119,10 +195,30 @@ export default function CartPage() {
       };
 
       const order = await ordersApi.create(payload);
+      
+      // Save order details to show in modal
+      setCreatedOrder(order);
+
+      // Call payment intent to get VietQR payload
+      try {
+        const intentResult = await paymentsApi.sepayIntent({
+          orderId: order.id,
+          customerId: order.customerId,
+          amount: order.totalAmount,
+        });
+        if (intentResult && intentResult.ok) {
+          setSepayIntentData(intentResult);
+        }
+      } catch (err) {
+        console.error("Lỗi khi tạo payment intent:", err);
+      }
+
       writeCart({});
       setCart({});
+      setShowPaymentModal(true);
+
       setMessage(
-        `Đã tạo đơn ${order.id.slice(0, 8)}. Bạn có thể theo dõi trong trang Đơn hàng.`,
+        `Đã tạo đơn ${order.id.slice(0, 8)}. Vui lòng thanh toán để hoàn tất đơn hàng.`,
       );
     } catch (error) {
       setMessage(
@@ -303,6 +399,183 @@ export default function CartPage() {
           </Card>
         </aside>
       </div>
+
+      {/* Modal Thanh toán & QR Code */}
+      <AnimatePresence>
+        {showPaymentModal && createdOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+              className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl backdrop-blur-md"
+            >
+              {/* Header */}
+              <div className="border-b bg-muted/30 p-6 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/10 text-green-500">
+                    <CheckCircle2 className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-foreground">Đặt hàng thành công!</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Mã đơn hàng: <span className="font-semibold text-primary">#{createdOrder.id}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="grid gap-6 p-6 md:grid-cols-2">
+                {/* Left Column: Order Summary */}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Tóm tắt đơn hàng</h4>
+                    <div className="max-h-[160px] overflow-y-auto space-y-2 rounded-lg border bg-muted/20 p-3">
+                      {createdOrder.items.map((item) => (
+                        <div key={item.productId} className="flex justify-between text-sm">
+                          <span className="font-medium text-foreground max-w-[70%] truncate">
+                            {item.productName} <span className="text-muted-foreground">x{item.quantity}</span>
+                          </span>
+                          <span className="font-semibold text-foreground">
+                            {formatVND(item.unitPrice * item.quantity)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 text-sm border-t pt-3">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Người nhận:</span>
+                      <span className="font-medium text-foreground">{createdOrder.shippingAddress.fullName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Số điện thoại:</span>
+                      <span className="font-medium text-foreground">{createdOrder.shippingAddress.phone}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Giao đến:</span>
+                      <span className="font-medium text-foreground text-right max-w-[65%] truncate">
+                        {createdOrder.shippingAddress.street}, {createdOrder.shippingAddress.city}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between rounded-lg bg-primary/5 p-4 border border-primary/10">
+                    <span className="font-bold text-foreground">Tổng cộng:</span>
+                    <span className="text-xl font-extrabold text-primary">{formatVND(createdOrder.totalAmount)}</span>
+                  </div>
+                </div>
+
+                {/* Right Column: QR Code & Webhook Simulator */}
+                <div className="flex flex-col items-center justify-center space-y-4 rounded-xl border border-dashed border-muted-foreground/30 bg-muted/10 p-4">
+                  <h4 className="text-sm font-bold text-foreground">Quét QR chuyển khoản (SePay)</h4>
+                  
+                  {sepayIntentData?.qrPayload ? (
+                    <div className="relative overflow-hidden rounded-lg border-4 border-white shadow-md bg-white p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://img.vietqr.io/image/${sepayIntentData.qrPayload.bankName}-${sepayIntentData.qrPayload.account}-compact2.png?amount=${sepayIntentData.qrPayload.amount}&addInfo=SEPAY%20${sepayIntentData.qrPayload.orderId.slice(0, 8)}`}
+                        alt="VietQR Code"
+                        className="h-[180px] w-[180px] object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-[180px] w-[180px] flex-col items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                      <span className="text-xs">Đang tạo mã QR...</span>
+                    </div>
+                  )}
+
+                  {sepayIntentData?.qrPayload && (
+                    <div className="text-center text-xs text-muted-foreground">
+                      <p>Ngân hàng: <span className="font-semibold text-foreground">{sepayIntentData.qrPayload.bankName}</span></p>
+                      <p>Số tài khoản: <span className="font-semibold text-foreground">{sepayIntentData.qrPayload.account}</span></p>
+                      <p>Nội dung: <span className="font-mono font-bold text-primary">SEPAY {sepayIntentData.qrPayload.orderId.slice(0, 8)}</span></p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Simulation section & Actions */}
+              <div className="border-t bg-muted/20 p-6 space-y-4">
+                <div className="rounded-xl border border-dashed border-orange-500/30 bg-orange-500/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
+                    <h5 className="text-xs font-bold text-orange-600 uppercase tracking-wider">Môi trường thử nghiệm (Developer Sandbox)</h5>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Sử dụng các nút bên dưới để giả lập tín hiệu webhook thanh toán từ cổng ngân hàng SePay gửi về hệ thống của chúng tôi để tự động xác nhận đơn hàng:
+                  </p>
+                  
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-green-600/10 hover:bg-green-600 hover:text-white border-green-600/30 text-green-600 text-xs gap-1.5"
+                      disabled={!sepayIntentData || simulatingPayment !== null}
+                      onClick={() => handleSimulatePayment("SUCCESS")}
+                    >
+                      {simulatingPayment === "SUCCESS" ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      )}
+                      Giả lập Thành công
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-red-600/10 hover:bg-red-600 hover:text-white border-red-600/30 text-red-600 text-xs gap-1.5"
+                      disabled={!sepayIntentData || simulatingPayment !== null}
+                      onClick={() => handleSimulatePayment("FAILED")}
+                    >
+                      {simulatingPayment === "FAILED" ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5" />
+                      )}
+                      Giả lập Thất bại
+                    </Button>
+                  </div>
+
+                  {simulationStatusMessage && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-xs font-medium text-foreground mt-2"
+                    >
+                      {simulationStatusMessage}
+                    </motion.p>
+                  )}
+                </div>
+
+                <div className="flex justify-between items-center pt-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setShowPaymentModal(false);
+                      setCreatedOrder(null);
+                      setSepayIntentData(null);
+                      setSimulationStatusMessage(null);
+                    }}
+                  >
+                    Đóng
+                  </Button>
+                  <Button asChild>
+                    <Link href="/orders">
+                      Xem Lịch sử đơn hàng →
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

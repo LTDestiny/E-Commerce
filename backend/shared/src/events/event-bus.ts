@@ -249,7 +249,7 @@ export class RedisEventBus implements IEventBus {
         correlationId: uuidv4(),
         payload: { channel, rawMessage: message },
         metadata: { error: (error as Error)?.message || "parse error" },
-      } as DomainEvent, error);
+      } as unknown as DomainEvent, error);
     }
   }
 

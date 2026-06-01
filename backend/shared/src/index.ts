@@ -23,6 +23,7 @@ export {
   retryWithBackoff,
   IdempotencyStore,
   RedisIdempotencyStore,
+  RedisSagaStore,
   CircuitBreaker,
   CircuitState,
 } from "./utils";

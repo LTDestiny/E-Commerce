@@ -71,10 +71,6 @@ export function registerEventHandlers(
         sagaState.set(orderId, state);
         await sagaStore?.set(orderId, state);
 
-        await orderRepository.updateStatus(
-          orderId,
-          OrderStatus.INVENTORY_RESERVED,
-        );
         console.log(
           `[${config.serviceName}] Stock reserved for order ${orderId}`,
         );
@@ -125,10 +121,6 @@ export function registerEventHandlers(
         sagaState.set(orderId, state);
         await sagaStore?.set(orderId, state);
 
-        await orderRepository.updateStatus(
-          orderId,
-          OrderStatus.PAYMENT_COMPLETED,
-        );
         console.log(
           `[${config.serviceName}] Payment processed for order ${orderId}`,
         );
@@ -206,7 +198,7 @@ export function registerEventHandlers(
         const { orderId } = event.payload;
         await orderRepository.updateStatus(
           orderId,
-          OrderStatus.SHIPPING_SCHEDULED,
+          OrderStatus.PROCESSING,
         );
       } catch (err) {
         console.error(`[${config.serviceName}] Order handler error:`, err);
@@ -224,7 +216,7 @@ export function registerEventHandlers(
 
       try {
         const { orderId } = event.payload;
-        await orderRepository.updateStatus(orderId, OrderStatus.SHIPPED);
+        await orderRepository.updateStatus(orderId, OrderStatus.PROCESSING);
       } catch (err) {
         console.error(`[${config.serviceName}] Order handler error:`, err);
         throw err;
@@ -241,7 +233,7 @@ export function registerEventHandlers(
 
       try {
         const { orderId } = event.payload;
-        await orderRepository.updateStatus(orderId, OrderStatus.DELIVERED);
+        await orderRepository.updateStatus(orderId, OrderStatus.COMPLETED);
       } catch (err) {
         console.error(`[${config.serviceName}] Order handler error:`, err);
         throw err;
@@ -292,9 +284,13 @@ async function cancelOrder(
   eventBus: IEventBus,
   eventStore: IEventStore,
 ): Promise<void> {
+  const status = reason.toLowerCase().includes("cancel")
+    ? OrderStatus.CANCELLED
+    : OrderStatus.FAILED;
+
   const order = await orderRepository.updateStatus(
     orderId,
-    OrderStatus.CANCELLED,
+    status,
   );
   if (!order) return;
 

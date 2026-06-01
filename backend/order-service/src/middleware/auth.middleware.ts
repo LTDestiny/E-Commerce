@@ -24,7 +24,13 @@ export function protectRoute(req: AuthenticatedRequest, res: Response, next: Nex
     id: String(userId),
     email: String(userEmail || ""),
     role: String(userRole || "USER"),
-    name: String(userName || "")
+    name: (() => {
+      try {
+        return decodeURIComponent(String(userName || ""));
+      } catch {
+        return String(userName || "");
+      }
+    })()
   };
 
   next();

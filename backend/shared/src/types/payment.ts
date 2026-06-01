@@ -4,10 +4,9 @@
 
 export enum PaymentStatus {
   PENDING = "PENDING",
-  AUTHORIZED = "AUTHORIZED",
-  PROCESSING = "PROCESSING",
   COMPLETED = "COMPLETED",
   FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
   REFUNDED = "REFUNDED",
 }
 
@@ -30,6 +29,11 @@ export interface Payment {
   status: PaymentStatus;
   transactionId?: string;
   idempotencyKey: string;
+  provider?: string;
+  qrCode?: string;
+  transferContent?: string;
+  paidAt?: string;
+  expiredAt?: string;
   createdAt: string;
   updatedAt: string;
 }

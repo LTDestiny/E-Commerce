@@ -15,11 +15,13 @@ import { OrderRow } from "../types";
 function toOrder(row: OrderRow): Order {
   return {
     id: row.id,
+    orderCode: row.orderCode,
     customerId: row.customerId,
     items: row.items as OrderItem[],
     totalAmount: row.totalAmount,
     shippingAddress: row.shippingAddress as ShippingAddress,
     status: row.status as OrderStatus,
+    paymentMethod: row.paymentMethod,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -32,13 +34,17 @@ class OrderRepository {
       0,
     );
 
+    const orderCode = `ORD-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
+
     const row = await prisma.order.create({
       data: {
+        orderCode,
         customerId: request.customerId,
         items: request.items as object[],
         totalAmount,
         shippingAddress: request.shippingAddress as object,
         status: OrderStatus.PENDING,
+        paymentMethod: request.paymentMethod || "SEPAY_QR",
       },
     });
 

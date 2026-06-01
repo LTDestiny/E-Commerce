@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/lib/constants";
-import { authApi, clearAuthSession, getStoredUser } from "@/lib/api";
+import { authApi, clearAuthSession, getStoredUser, syncClientAuthState } from "@/lib/api";
 import { CART_UPDATED_EVENT, getCartCount, readCart } from "@/lib/cart";
 
 const iconMap = {
@@ -43,9 +43,13 @@ export function Navbar() {
   // phụ thuộc localStorage (user, cartCount) — tránh layout shift
   const [mounted, setMounted] = useState(false);
 
+  const dynamicNavItems = mounted && user?.role === "ADMIN"
+    ? [...NAV_ITEMS, { label: "Quản trị", href: "/admin", icon: "PackageSearch" as const }]
+    : NAV_ITEMS;
+
   useEffect(() => {
     const syncSession = () => {
-      setUser(getStoredUser());
+      setUser(syncClientAuthState() ?? getStoredUser());
       setCartCount(getCartCount(readCart()));
     };
 
@@ -105,7 +109,7 @@ export function Navbar() {
 
           {/* Desktop nav */}
           <div className="hidden flex-1 items-center justify-end gap-1 overflow-hidden md:flex">
-            {NAV_ITEMS.map((item) => {
+            {dynamicNavItems.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (
@@ -178,7 +182,7 @@ export function Navbar() {
           className="border-t md:hidden"
         >
           <div className="space-y-1 px-4 py-3">
-            {NAV_ITEMS.map((item) => {
+            {dynamicNavItems.map((item) => {
               const Icon = iconMap[item.icon as keyof typeof iconMap];
               const isActive = pathname === item.href;
               return (

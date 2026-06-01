@@ -175,6 +175,62 @@ export function registerEventHandlers(
     },
   );
 
+  // ----- Listen: Payment Processed → Send in-app success notification -----
+  eventBus.subscribe(
+    EVENT_CHANNELS.PAYMENT_PROCESSED,
+    async (event: DomainEvent) => {
+      if (event.type !== "PAYMENT_PROCESSED") return;
+      await eventStore.append(event);
+
+      try {
+        const { orderId } = event.payload;
+        const customerId = String(event.metadata?.customerId || "");
+
+        if (!customerId) {
+          console.error(`[${config.serviceName}] Missing customerId in PAYMENT_PROCESSED metadata`);
+          return;
+        }
+
+        // Fetch order details to get orderCode
+        let orderCode = `ORD-${orderId.slice(0, 8)}`;
+        try {
+          const res = await fetch(`http://order-service:4001/api/orders/${orderId}`, {
+            headers: {
+              "x-user-id": customerId,
+              "x-user-role": "USER",
+            }
+          });
+          if (res.ok) {
+            const order = await res.json() as any;
+            if (order && order.orderCode) {
+              orderCode = order.orderCode;
+            }
+          }
+        } catch (fetchErr) {
+          console.error(`[${config.serviceName}] Failed to fetch order details for ${orderId}:`, fetchErr);
+        }
+
+        await sendNotification(
+          orderId,
+          customerId,
+          NotificationType.IN_APP,
+          "Thanh toán thành công",
+          `Thanh toán thành công cho đơn hàng ${orderCode}. Đơn hàng của bạn đã được ghi nhận.`,
+          event.correlationId,
+          eventBus,
+          eventStore,
+          idempotencyStore,
+        );
+      } catch (err) {
+        console.error(
+          `[${config.serviceName}] Notification handler error:`,
+          err,
+        );
+        throw err;
+      }
+    },
+  );
+
   console.log(`[${config.serviceName}] Event handlers registered`);
 }
 

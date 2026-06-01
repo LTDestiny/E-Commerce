@@ -64,9 +64,11 @@ services:
     container_name: ecommerce-auth-service
     ports:
       - "4006:4006"
+    env_file:
+      - auth-service/.env
     environment:
       PORT: 4006
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
       DATABASE_URL: postgresql://postgres:admin@postgres:5432/ecommerce_auth?schema=public
       JWT_ACCESS_SECRET: change_me_access_secret
       JWT_REFRESH_SECRET: change_me_refresh_secret
@@ -104,7 +106,7 @@ services:
     environment:
       PORT: 4000
       REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
       AUTH_SERVICE_URL: http://auth-service:4006
       ORDER_SERVICE_URL: http://order-service:4001
       PAYMENT_SERVICE_URL: http://payment-service:4002
@@ -186,6 +188,8 @@ services:
     container_name: ecommerce-payment-service
     ports:
       - "4002:4002"
+    env_file:
+      - payment-service/.env
     environment:
       PORT: 4002
       REDIS_URL: redis://redis:6379
@@ -329,11 +333,10 @@ services:
     environment:
       NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://localhost:4000
-    command: npm run dev -- --webpack
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000 --webpack
     volumes:
       - ../frontend:/app
       - /app/node_modules
-      - /app/.next
     depends_on:
       api-gateway:
         condition: service_healthy

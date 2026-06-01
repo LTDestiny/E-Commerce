@@ -17,6 +17,11 @@ function toPayment(row: PaymentRow): Payment {
     status: row.status as PaymentStatus,
     transactionId: row.transactionId || undefined,
     idempotencyKey: row.idempotencyKey,
+    provider: row.provider,
+    qrCode: row.qrCode || undefined,
+    transferContent: row.transferContent || undefined,
+    paidAt: row.paidAt ? row.paidAt.toISOString() : undefined,
+    expiredAt: row.expiredAt ? row.expiredAt.toISOString() : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -49,6 +54,55 @@ class PaymentRepository {
           method,
           status: PaymentStatus.PENDING,
           idempotencyKey,
+          provider: "SEPAY",
+        },
+      });
+      return toPayment(row);
+    } catch (error) {
+      const duplicate = await prisma.payment.findUnique({
+        where: { idempotencyKey },
+      });
+
+      if (duplicate) {
+        return toPayment(duplicate);
+      }
+
+      throw error;
+    }
+  }
+
+  async createSepay(
+    orderId: string,
+    customerId: string,
+    amount: number,
+    qrCode: string,
+    transferContent: string,
+    expiredAt: Date,
+  ): Promise<Payment> {
+    const idempotencyKey = `payment-${orderId}`;
+
+    const existing = await prisma.payment.findUnique({
+      where: { idempotencyKey },
+    });
+
+    if (existing) {
+      return toPayment(existing);
+    }
+
+    try {
+      const row = await prisma.payment.create({
+        data: {
+          orderId,
+          customerId,
+          amount,
+          currency: "VND",
+          method: "SEPAY_QR",
+          status: "PENDING",
+          idempotencyKey,
+          provider: "SEPAY",
+          qrCode,
+          transferContent,
+          expiredAt,
         },
       });
       return toPayment(row);
@@ -86,10 +140,12 @@ class PaymentRepository {
     id: string,
     status: PaymentStatus,
     transactionId?: string,
+    paidAt?: Date,
   ): Promise<Payment | null> {
     try {
-      const data: { status: string; transactionId?: string } = { status };
+      const data: { status: string; transactionId?: string; paidAt?: Date } = { status };
       if (transactionId) data.transactionId = transactionId;
+      if (paidAt) data.paidAt = paidAt;
 
       const row = await prisma.payment.update({
         where: { id },

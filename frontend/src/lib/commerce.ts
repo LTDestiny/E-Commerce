@@ -89,6 +89,19 @@ export const PRODUCT_CATALOG: ProductMeta[] = [
     sold: 760,
     warranty: "12 tháng Apple",
   },
+  {
+    id: "PROD-006",
+    name: "Thanh toán Thử nghiệm 10k",
+    price: 10000,
+    category: "Thử nghiệm",
+    shortDescription: "Sản phẩm thử nghiệm thanh toán thật bằng SePay.",
+    description: "Sử dụng sản phẩm này để quét QR và chuyển khoản thật 10,000 VND qua tài khoản ngân hàng của bạn để test kết nối thực tế.",
+    specs: ["10,000 VND", "Real Payment", "SePay"],
+    accentClass: "from-rose-500 to-orange-400",
+    rating: 5.0,
+    sold: 999,
+    warranty: "Không bảo hành",
+  },
 ];
 
 export function getProductMeta(productIdOrName: string): ProductMeta {
