@@ -14,6 +14,57 @@ const USER_KEY = "techsphere_auth_user";
 const ROLE_COOKIE_KEY = "auth_role";
 const TOKEN_COOKIE_KEY = "auth_token";
 
+type ClientRateLimitRule = {
+  windowMs: number;
+  max: number;
+};
+
+const clientRateLimitBuckets = new Map<string, number[]>();
+
+function getClientRateLimitRule(path: string, method: string): ClientRateLimitRule {
+  if (path.startsWith("/api/auth/login") || path.startsWith("/api/auth/register")) {
+    return { windowMs: 60_000, max: 8 };
+  }
+
+  if (path.startsWith("/api/auth/forgot-password") || path.startsWith("/api/auth/reset-password")) {
+    return { windowMs: 60_000, max: 4 };
+  }
+
+  if (path.startsWith("/api/ai")) {
+    return { windowMs: 60_000, max: 12 };
+  }
+
+  if (path.startsWith("/api/orders") && method === "POST") {
+    return { windowMs: 60_000, max: 5 };
+  }
+
+  if (path.startsWith("/api/payments") && method !== "GET") {
+    return { windowMs: 60_000, max: 10 };
+  }
+
+  return { windowMs: 60_000, max: 80 };
+}
+
+function assertClientRateLimit(path: string, method: string) {
+  if (typeof window === "undefined") return;
+
+  const rule = getClientRateLimitRule(path, method);
+  const now = Date.now();
+  const key = `${method}:${path.split("?")[0]}`;
+  const timestamps = (clientRateLimitBuckets.get(key) || []).filter(
+    (timestamp) => now - timestamp < rule.windowMs,
+  );
+
+  if (timestamps.length >= rule.max) {
+    throw new Error(
+      `Client rate limit exceeded for ${method} ${path}. Please wait and try again.`,
+    );
+  }
+
+  timestamps.push(now);
+  clientRateLimitBuckets.set(key, timestamps);
+}
+
 export type AuthUser = {
   id: string;
   name: string;
@@ -175,6 +226,9 @@ export function syncClientAuthState() {
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = (options?.method || "GET").toUpperCase();
+  assertClientRateLimit(path, method);
+
   const token = getStoredToken();
   const headers = new Headers(options?.headers);
   headers.set("Content-Type", "application/json");
