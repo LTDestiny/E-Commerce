@@ -1,26 +1,762 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: ecommerce-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ecommerce
-      POSTGRES_PASSWORD: ecommerce
-      POSTGRES_DB: ecommerce_auth
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   redis:
     image: redis:7-alpine
     container_name: ecommerce-redis
-    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis-data:/data
+    restart: unless-stopped
+    services:
+      redis:
+        image: redis:7-alpine
+        container_name: ecommerce-redis
+        ports:
+          - "6379:6379"
+        volumes:
+          - redis-data:/data
+        restart: unless-stopped
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 5s
+          timeout: 3s
+          retries: 5
+
+      postgres:
+        image: postgres:16-alpine
+        container_name: ecommerce-postgres
+        ports:
+          - "5432:5432"
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: postgres
+        volumes:
+          - postgres-data:/var/lib/postgresql/data
+          - ./backend/postgres-init:/docker-entrypoint-initdb.d
+        restart: unless-stopped
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U postgres"]
+          interval: 5s
+          timeout: 3s
+          retries: 10
+
+      zookeeper:
+        image: zookeeper:latest
+        container_name: ecommerce-zookeeper
+        ports:
+          - "2181:2181"
+        restart: unless-stopped
+
+      kafka:
+        image: confluentinc/cp-kafka:7.3.0
+        container_name: ecommerce-kafka
+        ports:
+          - "9092:9092"
+          - "29092:29092"
+        environment:
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+        depends_on:
+          - zookeeper
+        restart: unless-stopped
+
+      auth-service:
+        build:
+          context: ./backend
+          dockerfile: auth-service/Dockerfile
+        container_name: ecommerce-auth-service
+        ports:
+          - "4006:4006"
+        env_file:
+          - ./backend/auth-service/.env
+        environment:
+          PORT: 4006
+          CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/ecommerce_auth?schema=public
+          JWT_ACCESS_SECRET: change_me_access_secret
+          JWT_REFRESH_SECRET: change_me_refresh_secret
+          JWT_ACCESS_EXPIRES_IN: 15m
+          JWT_REFRESH_EXPIRES_IN: 30d
+          COOKIE_SECURE: "false"
+          COOKIE_SAMESITE: lax
+          REDIS_URL: redis://redis:6379
+        restart: unless-stopped
+        depends_on:
+          postgres:
+            condition: service_healthy
+          redis:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      api-gateway:
+        build:
+          context: ./backend
+          dockerfile: api-gateway/Dockerfile
+        container_name: ecommerce-api-gateway
+        ports:
+          - "4000:4000"
+        environment:
+          PORT: 4000
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+          AUTH_SERVICE_URL: http://auth-service:4006
+          ORDER_SERVICE_URL: http://order-service:4001
+          PAYMENT_SERVICE_URL: http://payment-service:4002
+          INVENTORY_SERVICE_URL: http://inventory-service:4003
+          SHIPPING_SERVICE_URL: http://shipping-service:4004
+          NOTIFICATION_SERVICE_URL: http://notification-service:4005
+          AI_SERVICE_URL: http://ai-service:4007
+          PROXY_TIMEOUT_MS: 30000
+          REQUEST_TIMEOUT_MS: 35000
+          CIRCUIT_FAILURE_THRESHOLD: 10
+          CIRCUIT_OPEN_MS: 30000
+          HEALTH_TIMEOUT_MS: 2000
+          HEALTH_RETRY_DELAYS_MS: 3000,5000
+          RATE_LIMIT_WINDOW_MS: 60000
+          RATE_LIMIT_MAX: 120
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: api-gateway
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+          ORDER_RATE_LIMIT_WINDOW_MS: 60000
+          ORDER_RATE_LIMIT_MAX: 10
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          auth-service:
+            condition: service_healthy
+          ai-service:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      order-service:
+        build:
+          context: ./backend
+          dockerfile: order-service/Dockerfile
+        container_name: ecommerce-order-service
+        ports:
+          - "4001:4001"
+        environment:
+          PORT: 4001
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/order_db
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: order-service
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          postgres:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      payment-service:
+        build:
+          context: ./backend
+          dockerfile: payment-service/Dockerfile
+        container_name: ecommerce-payment-service
+        ports:
+          - "4002:4002"
+        env_file:
+          - ./backend/payment-service/.env
+        environment:
+          PORT: 4002
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/payment_db
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: payment-service
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          postgres:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      inventory-service:
+        build:
+          context: ./backend
+          dockerfile: inventory-service/Dockerfile
+        container_name: ecommerce-inventory-service
+        ports:
+          - "4003:4003"
+        environment:
+          PORT: 4003
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/inventory_db
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: inventory-service
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          postgres:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      shipping-service:
+        build:
+          context: ./backend
+          dockerfile: shipping-service/Dockerfile
+        container_name: ecommerce-shipping-service
+        ports:
+          - "4004:4004"
+        environment:
+          PORT: 4004
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/shipping_db
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: shipping-service
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          postgres:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      notification-service:
+        build:
+          context: ./backend
+          dockerfile: notification-service/Dockerfile
+        container_name: ecommerce-notification-service
+        ports:
+          - "4005:4005"
+        environment:
+          PORT: 4005
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          DATABASE_URL: postgresql://postgres:admin@postgres:5432/notification_db
+          KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+          KAFKA_CLIENT_ID: notification-service
+          KAFKA_MAX_RETRIES: 5
+          KAFKA_RETRY_BASE_MS: 500
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          postgres:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      ai-service:
+        build:
+          context: ./backend
+          dockerfile: ai-service/Dockerfile
+        container_name: ecommerce-ai-service
+        ports:
+          - "4007:4007"
+        env_file:
+          - ./backend/ai-service/.env
+        environment:
+          PORT: 4007
+          REDIS_URL: redis://redis:6379
+          CORS_ORIGIN: http://localhost:3000
+          INVENTORY_SERVICE_URL: http://inventory-service:4003
+        restart: unless-stopped
+        depends_on:
+          redis:
+            condition: service_healthy
+          inventory-service:
+            condition: service_healthy
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:4007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 20s
+
+      frontend:
+        build:
+          context: ./frontend
+          dockerfile: Dockerfile
+        ports:
+          - "3000:3000"
+        environment:
+          NODE_ENV: development
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+        command: npm run dev -- --hostname 0.0.0.0 --port 3000 --webpack
+        volumes:
+          - ./frontend:/app
+          - /app/node_modules
+        depends_on:
+          api-gateway:
+            condition: service_healthy
+        restart: unless-stopped
+        healthcheck:
+          test:
+            [
+              "CMD",
+              "node",
+              "-e",
+              "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+            ]
+          interval: 10s
+          timeout: 5s
+          retries: 3
+          start_period: 30s
+
+    volumes:
+      redis-data:
+      postgres-data:
+    image: zookeeper:latest
+    container_name: ecommerce-zookeeper
+    ports:
+      - "2181:2181"
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: ecommerce-kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: auth-service/Dockerfile
+    container_name: ecommerce-auth-service
+    ports:
+      - "4006:4006"
+    env_file:
+      - ./backend/auth-service/.env
+    environment:
+      PORT: 4006
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/ecommerce_auth?schema=public
+      JWT_ACCESS_SECRET: change_me_access_secret
+      JWT_REFRESH_SECRET: change_me_refresh_secret
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 30d
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  api-gateway:
+    build:
+      context: ./backend
+      dockerfile: api-gateway/Dockerfile
+    container_name: ecommerce-api-gateway
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000,http://localhost:3001
+      AUTH_SERVICE_URL: http://auth-service:4006
+      ORDER_SERVICE_URL: http://order-service:4001
+      PAYMENT_SERVICE_URL: http://payment-service:4002
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+      SHIPPING_SERVICE_URL: http://shipping-service:4004
+      NOTIFICATION_SERVICE_URL: http://notification-service:4005
+      AI_SERVICE_URL: http://ai-service:4007
+      PROXY_TIMEOUT_MS: 30000
+      REQUEST_TIMEOUT_MS: 35000
+      CIRCUIT_FAILURE_THRESHOLD: 10
+      CIRCUIT_OPEN_MS: 30000
+      HEALTH_TIMEOUT_MS: 2000
+      HEALTH_RETRY_DELAYS_MS: 3000,5000
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX: 120
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: api-gateway
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+      ORDER_RATE_LIMIT_WINDOW_MS: 60000
+      ORDER_RATE_LIMIT_MAX: 10
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  order-service:
+    build:
+      context: ./backend
+      dockerfile: order-service/Dockerfile
+    container_name: ecommerce-order-service
+    ports:
+      - "4001:4001"
+    environment:
+      PORT: 4001
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/order_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: order-service
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  payment-service:
+    build:
+      context: ./backend
+      dockerfile: payment-service/Dockerfile
+    container_name: ecommerce-payment-service
+    ports:
+      - "4002:4002"
+    env_file:
+      - ./backend/payment-service/.env
+    environment:
+      PORT: 4002
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/payment_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: payment-service
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  inventory-service:
+    build:
+      context: ./backend
+      dockerfile: inventory-service/Dockerfile
+    container_name: ecommerce-inventory-service
+    ports:
+      - "4003:4003"
+    environment:
+      PORT: 4003
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/inventory_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: inventory-service
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  shipping-service:
+    build:
+      context: ./backend
+      dockerfile: shipping-service/Dockerfile
+    container_name: ecommerce-shipping-service
+    ports:
+      - "4004:4004"
+    environment:
+      PORT: 4004
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/shipping_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: shipping-service
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: notification-service/Dockerfile
+    container_name: ecommerce-notification-service
+    ports:
+      - "4005:4005"
+    environment:
+      PORT: 4005
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://postgres:admin@postgres:5432/notification_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CLIENT_ID: notification-service
+      KAFKA_MAX_RETRIES: 5
+      KAFKA_RETRY_BASE_MS: 500
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ai-service:
+    build:
+      context: ./backend
+      dockerfile: ai-service/Dockerfile
+    container_name: ecommerce-ai-service
+    ports:
+      - "4007:4007"
+    env_file:
+      - ./backend/ai-service/.env
+    environment:
+      PORT: 4007
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000 --webpack
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
-  postgres_data:
-  redis_data:
+  redis-data:
+  postgres-data:
