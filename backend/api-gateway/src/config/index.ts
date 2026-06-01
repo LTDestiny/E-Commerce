@@ -63,5 +63,6 @@ export const config = {
     shipping: process.env.SHIPPING_SERVICE_URL || "http://localhost:4004",
     notification:
       process.env.NOTIFICATION_SERVICE_URL || "http://localhost:4005",
+    ai: process.env.AI_SERVICE_URL || "http://localhost:4007",
   },
 };

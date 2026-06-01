@@ -475,6 +475,36 @@ export interface StoredEvent {
   storedAt: string;
 }
 
+// ----- AI Chat -----
+export interface AIChatPayload {
+  session_id: string;
+  message: string;
+  cart_items?: any[];
+}
+
+export interface AgentAction {
+  type: "ADD_TO_CART" | "NONE";
+  productId?: string;
+  productName?: string;
+  quantity?: number;
+  confirmMessage?: string;
+}
+
+export interface AIChatResponse {
+  ok: boolean;
+  bot_response: string;
+  suggested_products: Array<{ productId: string; reason: string }>;
+  agent_action?: AgentAction;
+}
+
+export const aiApi = {
+  chat: (payload: AIChatPayload) =>
+    fetchWithRefresh<AIChatResponse>("/api/ai/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
 // ----- SSE Event Stream -----
 export function createEventStream(
   onEvent: (event: Record<string, unknown>) => void,

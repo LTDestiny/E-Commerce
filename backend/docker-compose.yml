@@ -113,10 +113,11 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:4003
       SHIPPING_SERVICE_URL: http://shipping-service:4004
       NOTIFICATION_SERVICE_URL: http://notification-service:4005
+      AI_SERVICE_URL: http://ai-service:4007
       PROXY_TIMEOUT_MS: 5000
       REQUEST_TIMEOUT_MS: 10000
-      CIRCUIT_FAILURE_THRESHOLD: 3
-      CIRCUIT_OPEN_MS: 15000
+      CIRCUIT_FAILURE_THRESHOLD: 10
+      CIRCUIT_OPEN_MS: 30000
       HEALTH_TIMEOUT_MS: 2000
       HEALTH_RETRY_DELAYS_MS: 3000,5000
       RATE_LIMIT_WINDOW_MS: 60000
@@ -132,6 +133,8 @@ services:
       redis:
         condition: service_healthy
       auth-service:
+        condition: service_healthy
+      ai-service:
         condition: service_healthy
     healthcheck:
       test:
@@ -317,6 +320,39 @@ services:
           "node",
           "-e",
           "fetch('http://localhost:4005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+    container_name: ecommerce-ai-service
+    ports:
+      - "4007:4007"
+    env_file:
+      - ai-service/.env
+    environment:
+      PORT: 4007
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4007/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 5s

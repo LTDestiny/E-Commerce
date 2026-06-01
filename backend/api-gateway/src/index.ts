@@ -72,6 +72,14 @@ function createCircuitGuard(serviceName: string, pathFilter: string) {
       return;
     }
 
+    // Circuit just closed after cooldown — reset failure counter
+    if (state.openedUntil > 0 && retryAfterMs <= 0) {
+      console.log(`[APIGateway] Circuit closed for ${serviceName}, resetting failure count`);
+      state.failures = 0;
+      state.openedUntil = 0;
+      state.lastError = undefined;
+    }
+
     next();
   };
 }
@@ -332,16 +340,19 @@ async function main() {
       "/api/events/stream"
     ];
 
+    const authHeader = req.headers.authorization;
+    const isAiPath = req.path.startsWith("/api/ai");
+
     if (
       publicPaths.includes(req.path) ||
       req.path.startsWith("/api/inventory") ||
       req.path.startsWith("/api/events") ||
-      req.path === "/api/payments/sepay/webhook"
+      req.path === "/api/payments/sepay/webhook" ||
+      (isAiPath && (!authHeader || !authHeader.startsWith("Bearer ")))
     ) {
       return next();
     }
 
-    const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       res.status(401).json({ error: "Missing authorization token", code: "UNAUTHORIZED" });
       return;
@@ -408,6 +419,12 @@ async function main() {
     target: config.services.notification,
   }));
 
+  app.use(...createStableProxy({
+    name: "AIService",
+    pathFilter: "/api/ai",
+    target: config.services.ai,
+  }));
+
   const sseClients: Set<ExpressResponse> = new Set();
 
   app.get("/api/events/stream", (req: Request, res: ExpressResponse) => {
@@ -470,6 +487,7 @@ async function main() {
       { name: "InventoryService", url: config.services.inventory },
       { name: "ShippingService", url: config.services.shipping },
       { name: "NotificationService", url: config.services.notification },
+      { name: "AIService", url: config.services.ai },
     ];
 
     const checks = await Promise.all(
