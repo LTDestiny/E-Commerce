@@ -66,6 +66,100 @@ async function fetchShipmentByOrder(orderId: string): Promise<any> {
   return null;
 }
 
+type InventoryAvailabilityIssue = {
+  productId: string;
+  productName?: string;
+  requestedQuantity: number;
+  availableStock?: number;
+  reason: string;
+};
+
+async function fetchInventoryItem(productId: string): Promise<{ item: any | null; reachable: boolean }> {
+  const urls = [
+    `http://ecommerce-inventory-service:4003/api/inventory/${productId}`,
+    `http://inventory-service:4003/api/inventory/${productId}`,
+    `http://localhost:4003/api/inventory/${productId}`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (res.status === 404) return { item: null, reachable: true };
+      if (res.ok) return { item: await res.json(), reachable: true };
+    } catch {
+      // Try the next service alias.
+    }
+  }
+
+  return { item: null, reachable: false };
+}
+
+async function validateInventoryAvailability(
+  items: CreateOrderRequest["items"],
+): Promise<{ unavailable: boolean; issues: InventoryAvailabilityIssue[] }> {
+  const issues: InventoryAvailabilityIssue[] = [];
+  let unavailable = false;
+
+  for (const item of items) {
+    const requestedQuantity = Number(item.quantity);
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity <= 0) {
+      issues.push({
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity,
+        reason: "Quantity must be greater than 0",
+      });
+      continue;
+    }
+
+    const inventory = await fetchInventoryItem(item.productId);
+    if (!inventory.reachable) {
+      unavailable = true;
+      issues.push({
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity,
+        reason: "Inventory service is unavailable",
+      });
+      continue;
+    }
+
+    if (!inventory.item) {
+      issues.push({
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity,
+        reason: "Product not found in inventory",
+      });
+      continue;
+    }
+
+    const availableStock = Number(inventory.item.availableStock ?? 0);
+    if (!Number.isFinite(availableStock) || availableStock <= 0) {
+      issues.push({
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity,
+        availableStock: 0,
+        reason: "Sold out",
+      });
+      continue;
+    }
+
+    if (availableStock < requestedQuantity) {
+      issues.push({
+        productId: item.productId,
+        productName: item.productName,
+        requestedQuantity,
+        availableStock,
+        reason: "Insufficient stock",
+      });
+    }
+  }
+
+  return { unavailable, issues };
+}
+
 async function patchRelatedStatus(
   urls: string[],
   status: string,
@@ -206,6 +300,17 @@ export function createOrderRoutes(
         !request.shippingAddress
       ) {
         res.status(400).json({ error: "Missing required fields" });
+        return;
+      }
+
+      const stockValidation = await validateInventoryAvailability(request.items);
+      if (stockValidation.issues.length > 0) {
+        res.status(stockValidation.unavailable ? 503 : 409).json({
+          error: stockValidation.unavailable
+            ? "Inventory service unavailable"
+            : "Some products are sold out or have insufficient stock",
+          items: stockValidation.issues,
+        });
         return;
       }
 

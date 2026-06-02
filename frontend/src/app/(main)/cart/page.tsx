@@ -194,6 +194,13 @@ export default function CartPage() {
     () => new Map(inventory.map((item) => [item.productId, item])),
     [inventory],
   );
+  const stockIssues = useMemo(() => {
+    return cartItems.filter((item) => {
+      const available = stockById.get(item.id)?.availableStock;
+      return available !== undefined && (available <= 0 || item.quantity > available);
+    });
+  }, [cartItems, stockById]);
+  const hasStockIssues = stockIssues.length > 0;
 
   function setQuantity(productId: string, quantity: number) {
     const next = updateCartQuantity(cart, productId, quantity);
@@ -203,6 +210,12 @@ export default function CartPage() {
 
   async function placeOrder() {
     if (cartItems.length === 0 || checkoutLockRef.current) return;
+    if (hasStockIssues) {
+      setMessage(
+        `Có ${stockIssues.length} sản phẩm đã hết hàng hoặc không đủ tồn kho. Vui lòng chỉnh giỏ hàng trước khi đặt hàng.`,
+      );
+      return;
+    }
 
     checkoutLockRef.current = true;
     setPlacing(true);
@@ -307,18 +320,28 @@ export default function CartPage() {
               cartItems.map((item) => {
                 const stock = stockById.get(item.id);
                 const available = stock?.availableStock;
+                const soldOut = available !== undefined && available <= 0;
+                const insufficientStock = available !== undefined && item.quantity > available;
 
                 return (
                   <div
                     key={item.id}
-                    className="grid gap-4 rounded-lg border p-4 sm:grid-cols-[1fr_auto]"
+                    className={`grid gap-4 rounded-lg border p-4 sm:grid-cols-[1fr_auto] ${
+                      soldOut || insufficientStock ? "border-red-500/50 bg-red-500/5" : ""
+                    }`}
                   >
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="font-semibold">{item.name}</h2>
                         <Badge variant="outline">{item.category}</Badge>
-                        <Badge variant={available ? "secondary" : "outline"}>
-                          {available === undefined ? "Đang kiểm tra kho" : `Còn ${available}`}
+                        <Badge variant={soldOut || insufficientStock ? "destructive" : "secondary"}>
+                          {available === undefined
+                            ? "Đang kiểm tra kho"
+                            : soldOut
+                              ? "Sold out"
+                              : insufficientStock
+                                ? `Chỉ còn ${available}`
+                                : `Còn ${available}`}
                         </Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
@@ -414,7 +437,7 @@ export default function CartPage() {
               <Button
                 className="w-full"
                 size="lg"
-                disabled={cartItems.length === 0 || placing || checkoutCooldown}
+                disabled={cartItems.length === 0 || placing || checkoutCooldown || hasStockIssues}
                 onClick={placeOrder}
               >
                 {placing || checkoutCooldown ? (
@@ -426,7 +449,9 @@ export default function CartPage() {
                   ? "Đang tạo đơn..."
                   : checkoutCooldown
                     ? "Chờ chống spam..."
-                    : "Đặt hàng"}
+                    : hasStockIssues
+                      ? "Có sản phẩm hết hàng"
+                      : "Đặt hàng"}
               </Button>
             </CardContent>
           </Card>

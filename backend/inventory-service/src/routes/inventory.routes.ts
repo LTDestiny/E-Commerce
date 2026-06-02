@@ -9,6 +9,8 @@ import {
   IEventBus,
   IEventStore,
   ProductCreatedEvent,
+  ProductDeletedEvent,
+  ProductUpdatedEvent,
   createEvent,
 } from "@ecommerce/shared";
 import { inventoryRepository } from "../models/inventory.repository";
@@ -23,20 +25,94 @@ const realtimePublisher = new Redis(config.redis.url);
 async function publishProductCreatedEvent(
   eventBus: IEventBus,
   eventStore: IEventStore,
-  event: ProductCreatedEvent,
+  event: ProductCreatedEvent | ProductUpdatedEvent | ProductDeletedEvent,
 ) {
   try {
     await eventStore.append(event);
-    await eventBus.publish(EVENT_CHANNELS.PRODUCT_CREATED, event);
+    const channel =
+      event.type === "PRODUCT_UPDATED"
+        ? EVENT_CHANNELS.PRODUCT_UPDATED
+        : event.type === "PRODUCT_DELETED"
+          ? EVENT_CHANNELS.PRODUCT_DELETED
+          : EVENT_CHANNELS.PRODUCT_CREATED;
+    await eventBus.publish(channel, event);
   } catch (error) {
-    console.warn("[InventoryService] Product created but domain event publish failed:", error);
+    console.warn("[InventoryService] Product changed but domain event publish failed:", error);
   }
 
   try {
     await realtimePublisher.publish("inventory.events", JSON.stringify(event));
   } catch (error) {
-    console.warn("[InventoryService] Product created but realtime broadcast failed:", error);
+    console.warn("[InventoryService] Product changed but realtime broadcast failed:", error);
   }
+}
+
+function requireAdmin(req: Request, res: Response) {
+  if (String(req.headers["x-user-role"] || "") !== "ADMIN") {
+    res.status(403).json({ error: "Admin role is required" });
+    return false;
+  }
+  return true;
+}
+
+function parseProductPayload(body: any, partial = false) {
+  const totalStock = body.totalStock === undefined ? undefined : Number(body.totalStock);
+  const lowStockThreshold = body.lowStockThreshold === undefined ? undefined : Number(body.lowStockThreshold);
+  const price = body.price === undefined ? undefined : Number(body.price);
+  const rating = body.rating === undefined ? undefined : Number(body.rating);
+  const sold = body.sold === undefined ? undefined : Number(body.sold);
+  const specs = Array.isArray(body.specs)
+    ? body.specs.map((item: unknown) => String(item).trim()).filter(Boolean)
+    : body.specs === undefined
+      ? undefined
+      : String(body.specs || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+  if (!partial && (!body.productName || totalStock === undefined)) {
+    throw new Error("productName and totalStock are required");
+  }
+
+  if (totalStock !== undefined && (!Number.isInteger(totalStock) || totalStock < 0)) {
+    throw new Error("totalStock must be a non-negative integer");
+  }
+
+  if (
+    lowStockThreshold !== undefined &&
+    (!Number.isInteger(lowStockThreshold) || lowStockThreshold < 0)
+  ) {
+    throw new Error("lowStockThreshold must be a non-negative integer");
+  }
+
+  if (price !== undefined && (!Number.isFinite(price) || price < 0)) {
+    throw new Error("price must be a non-negative number");
+  }
+
+  if (rating !== undefined && (!Number.isFinite(rating) || rating < 0 || rating > 5)) {
+    throw new Error("rating must be between 0 and 5");
+  }
+
+  if (sold !== undefined && (!Number.isInteger(sold) || sold < 0)) {
+    throw new Error("sold must be a non-negative integer");
+  }
+
+  return {
+    productName: body.productName === undefined ? undefined : String(body.productName).trim(),
+    totalStock,
+    lowStockThreshold,
+    price,
+    category: body.category === undefined ? undefined : String(body.category).trim(),
+    shortDescription:
+      body.shortDescription === undefined ? undefined : String(body.shortDescription).trim(),
+    description: body.description === undefined ? undefined : String(body.description).trim(),
+    specs,
+    accentClass: body.accentClass === undefined ? undefined : String(body.accentClass).trim(),
+    rating,
+    sold,
+    warranty: body.warranty === undefined ? undefined : String(body.warranty).trim(),
+    image: body.image === undefined ? undefined : String(body.image).trim(),
+  };
 }
 
 export function createInventoryRoutes(
@@ -58,10 +134,7 @@ export function createInventoryRoutes(
   // POST /api/inventory - Admin creates a new catalog product
   router.post("/", async (req: Request, res: Response) => {
     try {
-      if (String(req.headers["x-user-role"] || "") !== "ADMIN") {
-        res.status(403).json({ error: "Admin role is required" });
-        return;
-      }
+      if (!requireAdmin(req, res)) return;
 
       const body = req.body || {};
       const productId = String(body.productId || "").trim().toUpperCase();
@@ -147,6 +220,86 @@ export function createInventoryRoutes(
     } catch (error) {
       console.error("[InventoryService] Error creating product:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/inventory/:productId - Admin updates catalog/product stock fields
+  router.patch("/:productId", async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+
+      const productId = String(req.params.productId || "").trim().toUpperCase();
+      const payload = parseProductPayload(req.body || {}, true);
+      const item = await inventoryRepository.updateProduct(productId, payload);
+
+      if (!item) {
+        res.status(404).json({ error: "Product not found" });
+        return;
+      }
+
+      const event = createEvent<ProductUpdatedEvent>(
+        "PRODUCT_UPDATED",
+        config.serviceName,
+        {
+          productId: item.productId,
+          productName: item.productName,
+          totalStock: item.totalStock,
+          availableStock: item.availableStock,
+          price: item.price,
+          category: item.category,
+          image: item.image,
+        },
+        undefined,
+        {
+          actorId: req.headers["x-user-id"] || "admin",
+          actorRole: req.headers["x-user-role"] || "ADMIN",
+        },
+      );
+
+      await publishProductCreatedEvent(eventBus, eventStore, event);
+      res.json(item);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Internal server error";
+      const status = message.includes("reservedStock") || message.includes("must be") || message.includes("between") ? 400 : 500;
+      console.error("[InventoryService] Error updating product:", error);
+      res.status(status).json({ error: message });
+    }
+  });
+
+  // DELETE /api/inventory/:productId - Admin deletes product if it has no reserved stock
+  router.delete("/:productId", async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+
+      const productId = String(req.params.productId || "").trim().toUpperCase();
+      const deleted = await inventoryRepository.deleteProduct(productId);
+
+      if (!deleted) {
+        res.status(404).json({ error: "Product not found" });
+        return;
+      }
+
+      const event = createEvent<ProductDeletedEvent>(
+        "PRODUCT_DELETED",
+        config.serviceName,
+        {
+          productId: deleted.productId,
+          productName: deleted.productName,
+        },
+        undefined,
+        {
+          actorId: req.headers["x-user-id"] || "admin",
+          actorRole: req.headers["x-user-role"] || "ADMIN",
+        },
+      );
+
+      await publishProductCreatedEvent(eventBus, eventStore, event);
+      res.json({ ok: true, product: deleted });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Internal server error";
+      const status = message.includes("reserved stock") ? 409 : 500;
+      console.error("[InventoryService] Error deleting product:", error);
+      res.status(status).json({ error: message });
     }
   });
 

@@ -20,6 +20,7 @@ type InventoryProductLike = {
   warranty?: string | null;
   image?: string | null;
   images?: string[] | null;
+  totalStock?: number | null;
   availableStock?: number | null;
 };
 
@@ -169,6 +170,8 @@ function productMetaFromInventory(item: InventoryProductLike): ProductMeta {
     sold: item.sold ?? 10,
     warranty: item.warranty ?? "12 tháng chính hãng",
     image: item.image ?? item.images?.[0] ?? undefined,
+    availableStock: Math.max(0, item.availableStock ?? 0),
+    totalStock: Math.max(0, item.totalStock ?? item.availableStock ?? 0),
   };
 }
 

@@ -391,6 +391,10 @@ export interface CreateInventoryProductPayload {
   image?: string;
 }
 
+export type UpdateInventoryProductPayload = Partial<
+  Omit<CreateInventoryProductPayload, "productId">
+>;
+
 export const inventoryApi = {
   list: () => fetchApi<InventoryItem[]>("/api/inventory"),
   get: (productId: string) => fetchApi<InventoryItem>(`/api/inventory/${productId}`),
@@ -399,6 +403,15 @@ export const inventoryApi = {
     fetchApi<InventoryItem>("/api/inventory", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  update: (productId: string, payload: UpdateInventoryProductPayload) =>
+    fetchApi<InventoryItem>(`/api/inventory/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  delete: (productId: string) =>
+    fetchApi<{ ok: boolean; product: InventoryItem }>(`/api/inventory/${productId}`, {
+      method: "DELETE",
     }),
 };
 

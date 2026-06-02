@@ -851,6 +851,7 @@ function AmountRow({ label, value, strong }: { label: string; value: string; str
 
 export function AdminInventoryPage() {
   const { data, loading, error, reload } = useAdminData();
+  const [editingProduct, setEditingProduct] = useState<InventoryItem | null>(null);
   const low = data.inventory.filter((item) => getAvailable(item) > 0 && getAvailable(item) <= item.lowStockThreshold);
   const out = data.inventory.filter((item) => getAvailable(item) <= 0);
   const value = data.inventory.reduce((sum, item) => sum + item.totalStock * (item.price || 0), 0);
@@ -865,13 +866,24 @@ export function AdminInventoryPage() {
         <StatCard icon={<AlertTriangle className="h-6 w-6" />} label="Low Stock Items" value={String(low.length)} tone="red" />
         <StatCard icon={<XCircle className="h-6 w-6" />} label="Out of Stock" value={String(out.length)} tone="amber" />
       </div>
-      <CreateProductPanel onCreated={reload} />
+      <CreateProductPanel
+        editingProduct={editingProduct}
+        onCancelEdit={() => setEditingProduct(null)}
+        onSaved={async () => {
+          setEditingProduct(null);
+          await reload();
+        }}
+      />
       <section className="rounded-xl border border-zinc-300 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-300 px-7 py-5">
           <h2 className="text-xl font-black">Product Inventory</h2>
           <div className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">Computed stock state</div>
         </div>
-        <InventoryTable items={data.inventory} />
+        <InventoryTable
+          items={data.inventory}
+          onEdit={setEditingProduct}
+          onChanged={reload}
+        />
       </section>
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-xl border border-zinc-300 bg-white p-7">
@@ -916,12 +928,54 @@ const emptyProductForm: CreateInventoryProductPayload = {
   image: "",
 };
 
-function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
+function toProductForm(item: InventoryItem): CreateInventoryProductPayload {
+  return {
+    productId: item.productId,
+    productName: item.productName,
+    totalStock: item.totalStock,
+    lowStockThreshold: item.lowStockThreshold,
+    price: item.price || 0,
+    category: item.category || "",
+    shortDescription: item.shortDescription || "",
+    description: item.description || "",
+    specs: item.specs || [],
+    accentClass: item.accentClass || "from-slate-800 to-slate-500",
+    rating: item.rating || 4.5,
+    sold: item.sold || 0,
+    warranty: item.warranty || "12 thang chinh hang",
+    image: item.image || "",
+  };
+}
+
+function CreateProductPanel({
+  editingProduct,
+  onCancelEdit,
+  onSaved,
+}: {
+  editingProduct: InventoryItem | null;
+  onCancelEdit: () => void;
+  onSaved: () => Promise<void>;
+}) {
   const [form, setForm] = useState<CreateInventoryProductPayload>(emptyProductForm);
   const [specsText, setSpecsText] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isEditing = Boolean(editingProduct);
+
+  useEffect(() => {
+    if (!editingProduct) {
+      setForm(emptyProductForm);
+      setSpecsText("");
+      return;
+    }
+
+    const next = toProductForm(editingProduct);
+    setForm(next);
+    setSpecsText((next.specs || []).join(", "));
+    setMessage(null);
+    setError(null);
+  }, [editingProduct]);
 
   function updateField<K extends keyof CreateInventoryProductPayload>(
     key: K,
@@ -952,11 +1006,31 @@ function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
           .filter(Boolean),
       };
 
-      await inventoryApi.create(payload);
+      if (isEditing) {
+        await inventoryApi.update(payload.productId, {
+          productName: payload.productName,
+          totalStock: payload.totalStock,
+          lowStockThreshold: payload.lowStockThreshold,
+          price: payload.price,
+          category: payload.category,
+          shortDescription: payload.shortDescription,
+          description: payload.description,
+          specs: payload.specs,
+          accentClass: payload.accentClass,
+          rating: payload.rating,
+          sold: payload.sold,
+          warranty: payload.warranty,
+          image: payload.image,
+        });
+        setMessage("Product updated. User catalog will update in realtime.");
+      } else {
+        await inventoryApi.create(payload);
+        setMessage("Product created. User catalog will update in realtime.");
+      }
+
       setForm(emptyProductForm);
       setSpecsText("");
-      setMessage("Product created. User catalog will update in realtime.");
-      await onCreated();
+      await onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cannot create product");
     } finally {
@@ -968,8 +1042,10 @@ function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
     <section className="rounded-xl border border-zinc-300 bg-white p-7">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-black">Add Product</h2>
-          <p className="text-sm text-zinc-600">Create a catalog item and publish it to customers immediately.</p>
+          <h2 className="text-xl font-black">{isEditing ? "Edit Product" : "Add Product"}</h2>
+          <p className="text-sm text-zinc-600">
+            {isEditing ? "Update catalog fields, stock, pricing, and image URL." : "Create a catalog item and publish it to customers immediately."}
+          </p>
         </div>
         <StatusBadge entityType="inventory" status="ACTIVE" />
       </div>
@@ -981,6 +1057,7 @@ function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
             onChange={(event) => updateField("productId", event.target.value.toUpperCase())}
             placeholder="PROD-011"
             className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            disabled={isEditing}
             required
           />
         </AdminField>
@@ -1102,13 +1179,24 @@ function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
             {message ? <span className="font-semibold text-emerald-700">{message}</span> : null}
             {error ? <span className="font-semibold text-red-700">{error}</span> : null}
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex h-10 items-center justify-center rounded-md bg-black px-5 text-sm font-black text-white transition hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {saving ? "Creating..." : "Create Product"}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            {isEditing ? (
+              <button
+                type="button"
+                onClick={onCancelEdit}
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-5 text-sm font-black text-zinc-800 transition hover:border-zinc-500"
+              >
+                Cancel
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex h-10 items-center justify-center rounded-md bg-black px-5 text-sm font-black text-white transition hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : isEditing ? "Update Product" : "Create Product"}
+            </button>
+          </div>
         </div>
       </form>
     </section>
@@ -1124,7 +1212,23 @@ function AdminField({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: boolean }) {
+function InventoryTable({
+  items,
+  compact,
+  onEdit,
+  onChanged,
+}: {
+  items: InventoryItem[];
+  compact?: boolean;
+  onEdit?: (item: InventoryItem) => void;
+  onChanged?: () => Promise<void>;
+}) {
+  async function deleteProduct(item: InventoryItem) {
+    if (!window.confirm(`Delete product ${item.productId}? This cannot be undone.`)) return;
+    await inventoryApi.delete(item.productId);
+    await onChanged?.();
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] text-left text-sm">
@@ -1140,6 +1244,7 @@ function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: 
             <th className="px-6 py-4">Available</th>
             <th className="px-6 py-4">Threshold</th>
             <th className="px-6 py-4">Status</th>
+            {!compact ? <th className="px-6 py-4">Actions</th> : null}
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-300">
@@ -1177,6 +1282,26 @@ function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: 
                     status={status.label === "Out of Stock" ? "OUT_OF_STOCK" : status.label === "Low Stock" ? "LOW_STOCK" : "ACTIVE"}
                   />
                 </td>
+                {!compact ? (
+                  <td className="px-6 py-5">
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => onEdit?.(item)}
+                        className="font-bold text-blue-700"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteProduct(item)}
+                        className="font-bold text-red-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             );
           })}

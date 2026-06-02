@@ -17,6 +17,8 @@ export type ProductMeta = {
   sold: number;
   warranty: string;
   image?: string;
+  availableStock: number;
+  totalStock: number;
 };
 
 type InventoryCatalogItem = {
@@ -25,6 +27,7 @@ type InventoryCatalogItem = {
   price?: number;
   category?: string;
   shortDescription?: string;
+  totalStock?: number;
   availableStock?: number;
   description?: string;
   specs?: unknown;
@@ -54,6 +57,8 @@ export async function fetchCatalogProducts(): Promise<ProductMeta[]> {
       sold: item.sold ?? 10,
       warranty: item.warranty ?? "12 tháng chính hãng",
       image: item.image ?? undefined,
+      availableStock: Math.max(0, item.availableStock ?? 0),
+      totalStock: Math.max(0, item.totalStock ?? item.availableStock ?? 0),
     };
   });
 }
@@ -70,6 +75,8 @@ export function getProductMeta(productIdOrName: string): ProductMeta {
     accentClass: "from-slate-800 to-slate-500",
     rating: 4.5,
     sold: 10,
+    availableStock: 0,
+    totalStock: 0,
     warranty: "12 tháng chính hãng",
   };
 }

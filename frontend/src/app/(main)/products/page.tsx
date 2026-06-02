@@ -55,6 +55,8 @@ function ProductsContent() {
     const eventSource = createEventStream((event) => {
       if (
         event.type === "PRODUCT_CREATED" ||
+        event.type === "PRODUCT_UPDATED" ||
+        event.type === "PRODUCT_DELETED" ||
         event.channel === "inventory.events"
       ) {
         void loadProducts();
@@ -86,10 +88,10 @@ function ProductsContent() {
     });
   }, [productsList, category, query]);
 
-  function changeQuantity(productId: string, delta: number) {
+  function changeQuantity(productId: string, delta: number, maxQuantity: number) {
     setQuantities((current) => ({
       ...current,
-      [productId]: Math.max(1, (current[productId] ?? 1) + delta),
+      [productId]: Math.min(maxQuantity, Math.max(1, (current[productId] ?? 1) + delta)),
     }));
   }
 
@@ -168,7 +170,10 @@ function ProductsContent() {
 
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {products.map((product, index) => {
-          const quantity = quantities[product.id] ?? 1;
+          const availableStock = product.availableStock;
+          const soldOut = availableStock <= 0;
+          const maxQuantity = Math.max(1, availableStock);
+          const quantity = Math.min(quantities[product.id] ?? 1, maxQuantity);
 
           return (
             <motion.div
@@ -196,10 +201,20 @@ function ProductsContent() {
                         <Package className="h-12 w-12 text-white" />
                       </div>
                     )}
+                    {soldOut && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/70 backdrop-blur-sm">
+                        <Badge variant="destructive" className="text-sm">
+                          Sold out
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{product.category}</Badge>
+                      <Badge variant={soldOut ? "destructive" : "outline"}>
+                        {soldOut ? "Sold out" : `Còn ${availableStock}`}
+                      </Badge>
                       <Badge variant="secondary">★ {product.rating}</Badge>
                       <Badge variant="secondary">Đã bán {product.sold}</Badge>
                     </div>
@@ -229,7 +244,8 @@ function ProductsContent() {
                         <Button
                           variant="outline"
                           size="icon-sm"
-                          onClick={() => changeQuantity(product.id, -1)}
+                          onClick={() => changeQuantity(product.id, -1, maxQuantity)}
+                          disabled={soldOut || quantity <= 1}
                         >
                           <Minus className="h-4 w-4" />
                         </Button>
@@ -239,7 +255,8 @@ function ProductsContent() {
                         <Button
                           variant="outline"
                           size="icon-sm"
-                          onClick={() => changeQuantity(product.id, 1)}
+                          onClick={() => changeQuantity(product.id, 1, maxQuantity)}
+                          disabled={soldOut || quantity >= availableStock}
                         >
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -247,10 +264,13 @@ function ProductsContent() {
                     </div>
                     <Button
                       className="w-full"
-                      onClick={() => addToCart(product.id, quantity)}
+                      onClick={() => {
+                        if (!soldOut) addToCart(product.id, quantity);
+                      }}
+                      disabled={soldOut}
                     >
                       <ShoppingCart className="h-4 w-4" />
-                      Thêm vào giỏ
+                      {soldOut ? "Sold out" : "Thêm vào giỏ"}
                     </Button>
                   </div>
                 </CardContent>

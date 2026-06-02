@@ -28,6 +28,10 @@ export type CreateInventoryItemRequest = {
   image?: string;
 };
 
+export type UpdateInventoryItemRequest = Partial<
+  Omit<CreateInventoryItemRequest, "productId">
+>;
+
 function toInventoryItem(row: InventoryItemRow): InventoryItem {
   return {
     productId: row.productId,
@@ -296,6 +300,62 @@ class InventoryRepository {
 
     await deleteCachedInventoryProducts([request.productId]);
 
+    return toInventoryItem(row);
+  }
+
+  async updateProduct(
+    productId: string,
+    request: UpdateInventoryItemRequest,
+  ): Promise<InventoryItem | null> {
+    const current = await prisma.inventoryItem.findUnique({
+      where: { productId },
+    });
+    if (!current) return null;
+
+    const totalStock = request.totalStock ?? current.totalStock;
+    if (totalStock < current.reservedStock) {
+      throw new Error("totalStock cannot be lower than reservedStock");
+    }
+
+    const row = await prisma.inventoryItem.update({
+      where: { productId },
+      data: {
+        productName: request.productName,
+        totalStock,
+        availableStock: totalStock - current.reservedStock,
+        lowStockThreshold: request.lowStockThreshold,
+        price: request.price,
+        category: request.category,
+        shortDescription: request.shortDescription,
+        description: request.description,
+        specs: request.specs,
+        accentClass: request.accentClass,
+        rating: request.rating,
+        sold: request.sold,
+        warranty: request.warranty,
+        image: request.image,
+      },
+    });
+
+    await deleteCachedInventoryProducts([productId]);
+    return toInventoryItem(row);
+  }
+
+  async deleteProduct(productId: string): Promise<InventoryItem | null> {
+    const current = await prisma.inventoryItem.findUnique({
+      where: { productId },
+    });
+    if (!current) return null;
+
+    if (current.reservedStock > 0) {
+      throw new Error("Cannot delete product with reserved stock");
+    }
+
+    const row = await prisma.inventoryItem.delete({
+      where: { productId },
+    });
+
+    await deleteCachedInventoryProducts([productId]);
     return toInventoryItem(row);
   }
 
