@@ -51,6 +51,19 @@ const CHECKOUT_COOLDOWN_MS = 3000;
 const PAID_ORDER_STATUSES = ["CONFIRMED", "PROCESSING", "COMPLETED"];
 type SepayIntentResponse = Awaited<ReturnType<typeof paymentsApi.sepayIntent>>;
 
+function getPaymentTimeLeftMs(expiredAt?: string) {
+  if (!expiredAt) return null;
+  return Math.max(0, new Date(expiredAt).getTime() - Date.now());
+}
+
+function formatCountdown(ms: number | null) {
+  if (ms === null) return "--:--";
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 const DEFAULT_ADDRESS = {
   fullName: "Nguyễn Văn A",
   phone: "0901234567",
@@ -76,8 +89,10 @@ export default function CartPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [sepayIntentData, setSepayIntentData] = useState<SepayIntentResponse | null>(null);
+  const [paymentTimeLeftMs, setPaymentTimeLeftMs] = useState<number | null>(null);
   const [simulationStatusMessage, setSimulationStatusMessage] = useState<string | null>(null);
   const paymentRedirectedRef = useRef(false);
+  const paymentExpired = paymentTimeLeftMs !== null && paymentTimeLeftMs <= 0;
 
   // Poll order status when payment modal is open
   useEffect(() => {
@@ -123,12 +138,32 @@ export default function CartPage() {
       }
 
       if (event.type === "PAYMENT_FAILED") {
-        setSimulationStatusMessage("Thanh toán thất bại. Vui lòng kiểm tra lại giao dịch hoặc liên hệ hỗ trợ.");
+        setPaymentTimeLeftMs(0);
+        setSimulationStatusMessage("Thanh toán thất bại hoặc đã quá thời gian. Đơn hàng đã bị hủy và sản phẩm được hoàn lại kho.");
       }
     });
 
     return () => eventSource.close();
   }, [showPaymentModal, createdOrder?.id, router]);
+
+  useEffect(() => {
+    const expiredAt = sepayIntentData?.payment.expiredAt;
+    if (!showPaymentModal || !expiredAt) return;
+
+    const interval = setInterval(() => {
+      const next = getPaymentTimeLeftMs(expiredAt);
+      setPaymentTimeLeftMs(next);
+
+      if (next !== null && next <= 0) {
+        clearInterval(interval);
+        setSimulationStatusMessage((current) =>
+          current || "Đã hết thời gian thanh toán. Hệ thống sẽ tự động hủy đơn và hoàn lại tồn kho.",
+        );
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [showPaymentModal, sepayIntentData?.payment.expiredAt]);
 
   const syncCart = useCallback(() => setCart(readCart()), []);
 
@@ -174,6 +209,7 @@ export default function CartPage() {
     setMessage(null);
     setCreatedOrder(null);
     setSepayIntentData(null);
+    setPaymentTimeLeftMs(null);
     setSimulationStatusMessage(null);
     paymentRedirectedRef.current = false;
 
@@ -204,6 +240,7 @@ export default function CartPage() {
         });
         if (intentResult && intentResult.ok) {
           setSepayIntentData(intentResult);
+          setPaymentTimeLeftMs(getPaymentTimeLeftMs(intentResult.payment.expiredAt));
         }
       } catch (err) {
         console.error("Lỗi khi tạo payment intent:", err);
@@ -492,6 +529,18 @@ export default function CartPage() {
                       <p>Nội dung: <span className="font-mono font-bold text-primary">SEPAY {sepayIntentData.qrPayload.orderId.slice(0, 8)}</span></p>
                     </div>
                   )}
+
+                  <div className={`w-full rounded-lg border p-3 text-center ${paymentExpired ? "border-red-500/30 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Thời gian thanh toán còn lại
+                    </div>
+                    <div className={`mt-1 font-mono text-3xl font-black ${paymentExpired ? "text-red-600" : "text-amber-600"}`}>
+                      {formatCountdown(paymentTimeLeftMs)}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Hết thời gian, đơn hàng sẽ bị hủy và stock sẽ được release.
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -514,6 +563,7 @@ export default function CartPage() {
                       setShowPaymentModal(false);
                       setCreatedOrder(null);
                       setSepayIntentData(null);
+                      setPaymentTimeLeftMs(null);
                       setSimulationStatusMessage(null);
                     }}
                   >

@@ -414,6 +414,7 @@ export interface Payment {
   transactionId?: string;
   provider?: string;
   paidAt?: string;
+  expiredAt?: string;
   createdAt: string;
   updatedAt: string;
 }
