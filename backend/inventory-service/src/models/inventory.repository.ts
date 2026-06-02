@@ -11,6 +11,23 @@ import {
 } from "../types";
 import { deleteCachedInventoryProducts } from "../lib/cache";
 
+export type CreateInventoryItemRequest = {
+  productId: string;
+  productName: string;
+  totalStock: number;
+  lowStockThreshold?: number;
+  price?: number;
+  category?: string;
+  shortDescription?: string;
+  description?: string;
+  specs?: string[];
+  accentClass?: string;
+  rating?: number;
+  sold?: number;
+  warranty?: string;
+  image?: string;
+};
+
 function toInventoryItem(row: InventoryItemRow): InventoryItem {
   return {
     productId: row.productId,
@@ -253,6 +270,33 @@ class InventoryRepository {
       where: { productId },
     });
     return row ? toInventoryItem(row) : null;
+  }
+
+  async createProduct(request: CreateInventoryItemRequest): Promise<InventoryItem> {
+    const row = await prisma.inventoryItem.create({
+      data: {
+        productId: request.productId,
+        productName: request.productName,
+        totalStock: request.totalStock,
+        reservedStock: 0,
+        availableStock: request.totalStock,
+        lowStockThreshold: request.lowStockThreshold ?? 10,
+        price: request.price,
+        category: request.category,
+        shortDescription: request.shortDescription,
+        description: request.description,
+        specs: request.specs ?? [],
+        accentClass: request.accentClass,
+        rating: request.rating ?? 4.5,
+        sold: request.sold ?? 0,
+        warranty: request.warranty,
+        image: request.image,
+      },
+    });
+
+    await deleteCachedInventoryProducts([request.productId]);
+
+    return toInventoryItem(row);
   }
 
   async reserveStock(

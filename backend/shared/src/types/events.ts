@@ -107,6 +107,19 @@ export interface LowStockAlertEvent extends BaseEvent {
   };
 }
 
+export interface ProductCreatedEvent extends BaseEvent {
+  type: "PRODUCT_CREATED";
+  payload: {
+    productId: string;
+    productName: string;
+    totalStock: number;
+    availableStock: number;
+    price?: number;
+    category?: string;
+    image?: string;
+  };
+}
+
 // ----- Payment Events -----
 export interface PaymentProcessedEvent extends BaseEvent {
   type: "PAYMENT_PROCESSED";
@@ -207,6 +220,7 @@ export type DomainEvent =
   | StockReservationFailedEvent
   | StockReleasedEvent
   | LowStockAlertEvent
+  | ProductCreatedEvent
   | PaymentProcessedEvent
   | PaymentFailedEvent
   | PaymentRefundedEvent
@@ -230,6 +244,7 @@ export const EVENT_CHANNELS = {
   STOCK_RESERVATION_FAILED: "inventory.stock_reservation_failed",
   STOCK_RELEASED: "inventory.stock_released",
   LOW_STOCK_ALERT: "inventory.low_stock_alert",
+  PRODUCT_CREATED: "inventory.product_created",
   PAYMENT_PROCESSED: "payment.processed",
   PAYMENT_FAILED: "payment.failed",
   PAYMENT_REFUNDED: "payment.refunded",

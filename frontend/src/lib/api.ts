@@ -361,12 +361,6 @@ export interface InventoryItem {
   reservedStock: number;
   availableStock: number;
   lowStockThreshold: number;
-  updatedAt: string;
-}
-
-export interface CatalogProduct {
-  productId: string;
-  productName: string;
   price?: number;
   category?: string;
   shortDescription?: string;
@@ -376,13 +370,36 @@ export interface CatalogProduct {
   rating?: number;
   sold?: number;
   warranty?: string;
-  images?: string[];
+  image?: string;
+  updatedAt: string;
+}
+
+export interface CreateInventoryProductPayload {
+  productId: string;
+  productName: string;
+  totalStock: number;
+  lowStockThreshold?: number;
+  price: number;
+  category: string;
+  shortDescription?: string;
+  description: string;
+  specs?: string[];
+  accentClass?: string;
+  rating?: number;
+  sold?: number;
+  warranty?: string;
+  image?: string;
 }
 
 export const inventoryApi = {
   list: () => fetchApi<InventoryItem[]>("/api/inventory"),
   get: (productId: string) => fetchApi<InventoryItem>(`/api/inventory/${productId}`),
   lowStock: () => fetchApi<InventoryItem[]>("/api/inventory/alerts/low-stock"),
+  create: (payload: CreateInventoryProductPayload) =>
+    fetchApi<InventoryItem>("/api/inventory", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ----- Payments -----

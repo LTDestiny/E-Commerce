@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -27,6 +28,7 @@ import {
   shipmentsApi,
   usersApi,
   type AdminUserRecord,
+  type CreateInventoryProductPayload,
   type HealthStatus,
   type InventoryItem,
   type NotificationItem,
@@ -848,10 +850,10 @@ function AmountRow({ label, value, strong }: { label: string; value: string; str
 }
 
 export function AdminInventoryPage() {
-  const { data, loading, error } = useAdminData();
+  const { data, loading, error, reload } = useAdminData();
   const low = data.inventory.filter((item) => getAvailable(item) > 0 && getAvailable(item) <= item.lowStockThreshold);
   const out = data.inventory.filter((item) => getAvailable(item) <= 0);
-  const value = data.inventory.reduce((sum, item) => sum + item.totalStock * 1000000, 0);
+  const value = data.inventory.reduce((sum, item) => sum + item.totalStock * (item.price || 0), 0);
   return (
     <AdminPageFrame
       title="Inventory Management"
@@ -863,6 +865,7 @@ export function AdminInventoryPage() {
         <StatCard icon={<AlertTriangle className="h-6 w-6" />} label="Low Stock Items" value={String(low.length)} tone="red" />
         <StatCard icon={<XCircle className="h-6 w-6" />} label="Out of Stock" value={String(out.length)} tone="amber" />
       </div>
+      <CreateProductPanel onCreated={reload} />
       <section className="rounded-xl border border-zinc-300 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-300 px-7 py-5">
           <h2 className="text-xl font-black">Product Inventory</h2>
@@ -896,14 +899,242 @@ export function AdminInventoryPage() {
   );
 }
 
+const emptyProductForm: CreateInventoryProductPayload = {
+  productId: "",
+  productName: "",
+  totalStock: 0,
+  lowStockThreshold: 10,
+  price: 0,
+  category: "",
+  shortDescription: "",
+  description: "",
+  specs: [],
+  accentClass: "from-slate-800 to-slate-500",
+  rating: 4.5,
+  sold: 0,
+  warranty: "12 thang chinh hang",
+  image: "",
+};
+
+function CreateProductPanel({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [form, setForm] = useState<CreateInventoryProductPayload>(emptyProductForm);
+  const [specsText, setSpecsText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function updateField<K extends keyof CreateInventoryProductPayload>(
+    key: K,
+    value: CreateInventoryProductPayload[K],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const payload: CreateInventoryProductPayload = {
+        ...form,
+        productId: form.productId.trim(),
+        productName: form.productName.trim(),
+        category: form.category.trim(),
+        shortDescription: form.shortDescription?.trim(),
+        description: form.description.trim(),
+        warranty: form.warranty?.trim(),
+        image: form.image?.trim(),
+        specs: specsText
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      };
+
+      await inventoryApi.create(payload);
+      setForm(emptyProductForm);
+      setSpecsText("");
+      setMessage("Product created. User catalog will update in realtime.");
+      await onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cannot create product");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-zinc-300 bg-white p-7">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-xl font-black">Add Product</h2>
+          <p className="text-sm text-zinc-600">Create a catalog item and publish it to customers immediately.</p>
+        </div>
+        <StatusBadge entityType="inventory" status="ACTIVE" />
+      </div>
+
+      <form onSubmit={submit} className="mt-6 grid gap-5 lg:grid-cols-4">
+        <AdminField label="Product ID">
+          <input
+            value={form.productId}
+            onChange={(event) => updateField("productId", event.target.value.toUpperCase())}
+            placeholder="PROD-011"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </AdminField>
+        <AdminField label="Product Name">
+          <input
+            value={form.productName}
+            onChange={(event) => updateField("productName", event.target.value)}
+            placeholder="Wireless Keyboard"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </AdminField>
+        <AdminField label="Category">
+          <input
+            value={form.category}
+            onChange={(event) => updateField("category", event.target.value)}
+            placeholder="Phu kien"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </AdminField>
+        <AdminField label="Image URL">
+          <input
+            value={form.image}
+            onChange={(event) => updateField("image", event.target.value)}
+            placeholder="https://..."
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+
+        <AdminField label="Total Stock">
+          <input
+            type="number"
+            min={0}
+            value={form.totalStock}
+            onChange={(event) => updateField("totalStock", Number(event.target.value))}
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </AdminField>
+        <AdminField label="Low Stock Threshold">
+          <input
+            type="number"
+            min={0}
+            value={form.lowStockThreshold}
+            onChange={(event) => updateField("lowStockThreshold", Number(event.target.value))}
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+        <AdminField label="Price">
+          <input
+            type="number"
+            min={0}
+            value={form.price}
+            onChange={(event) => updateField("price", Number(event.target.value))}
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </AdminField>
+        <AdminField label="Warranty">
+          <input
+            value={form.warranty}
+            onChange={(event) => updateField("warranty", event.target.value)}
+            placeholder="12 thang chinh hang"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+
+        <AdminField label="Short Description">
+          <input
+            value={form.shortDescription}
+            onChange={(event) => updateField("shortDescription", event.target.value)}
+            placeholder="Short product summary"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+        <AdminField label="Specs">
+          <input
+            value={specsText}
+            onChange={(event) => setSpecsText(event.target.value)}
+            placeholder="Bluetooth, USB-C, 24h battery"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+        <AdminField label="Accent Class">
+          <input
+            value={form.accentClass}
+            onChange={(event) => updateField("accentClass", event.target.value)}
+            placeholder="from-slate-800 to-slate-500"
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+        <AdminField label="Rating">
+          <input
+            type="number"
+            min={0}
+            max={5}
+            step={0.1}
+            value={form.rating}
+            onChange={(event) => updateField("rating", Number(event.target.value))}
+            className="h-10 w-full rounded-md border border-zinc-300 px-3 text-sm outline-none focus:border-blue-600"
+          />
+        </AdminField>
+
+        <label className="lg:col-span-4">
+          <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">Description</span>
+          <textarea
+            value={form.description}
+            onChange={(event) => updateField("description", event.target.value)}
+            rows={3}
+            placeholder="Product detail shown to customers"
+            className="mt-2 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-blue-600"
+            required
+          />
+        </label>
+
+        <div className="flex flex-col gap-3 lg:col-span-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm">
+            {message ? <span className="font-semibold text-emerald-700">{message}</span> : null}
+            {error ? <span className="font-semibold text-red-700">{error}</span> : null}
+          </div>
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center rounded-md bg-black px-5 text-sm font-black text-white transition hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {saving ? "Creating..." : "Create Product"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function AdminField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label>
+      <span className="text-xs font-black uppercase tracking-[0.12em] text-zinc-500">{label}</span>
+      <div className="mt-2">{children}</div>
+    </label>
+  );
+}
+
 function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: boolean }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="w-full min-w-[1040px] text-left text-sm">
         <thead className="bg-[#f0edf8] text-xs font-black uppercase tracking-[0.12em]">
           <tr>
+            <th className="px-6 py-4">Image</th>
             <th className="px-6 py-4">Product ID</th>
             <th className="px-6 py-4">Name</th>
+            <th className="px-6 py-4">Category</th>
+            <th className="px-6 py-4">Price</th>
             {!compact ? <th className="px-6 py-4">Total Stock</th> : null}
             <th className="px-6 py-4">Reserved</th>
             <th className="px-6 py-4">Available</th>
@@ -916,8 +1147,26 @@ function InventoryTable({ items, compact }: { items: InventoryItem[]; compact?: 
             const status = productStatus(item);
             return (
               <tr key={item.productId}>
+                <td className="px-6 py-5">
+                  {item.image ? (
+                    <Image
+                      src={item.image}
+                      alt={item.productName}
+                      width={64}
+                      height={48}
+                      unoptimized
+                      className="h-12 w-16 rounded-md object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-16 items-center justify-center rounded-md bg-zinc-100">
+                      <Package className="h-5 w-5 text-zinc-500" />
+                    </div>
+                  )}
+                </td>
                 <td className="px-6 py-5 font-semibold">{item.productId}</td>
                 <td className="px-6 py-5 font-black">{item.productName}</td>
+                <td className="px-6 py-5">{item.category || "-"}</td>
+                <td className="px-6 py-5 font-semibold">{money(item.price || 0)}</td>
                 {!compact ? <td className="px-6 py-5">{item.totalStock}</td> : null}
                 <td className="px-6 py-5">{item.reservedStock}</td>
                 <td className={cn("px-6 py-5 font-black", getAvailable(item) <= item.lowStockThreshold ? "text-red-700" : "")}>{getAvailable(item)}</td>

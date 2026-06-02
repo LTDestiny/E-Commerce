@@ -361,9 +361,12 @@ async function main() {
     const authHeader = req.headers.authorization;
     const isAiPath = req.path.startsWith("/api/ai");
 
+    const isPublicInventoryRead =
+      req.path.startsWith("/api/inventory") && req.method === "GET";
+
     if (
       publicPaths.includes(req.path) ||
-      req.path.startsWith("/api/inventory") ||
+      isPublicInventoryRead ||
       req.path.startsWith("/api/events") ||
       req.path === "/api/payments/sepay/webhook" ||
       (isAiPath && (!authHeader || !authHeader.startsWith("Bearer ")))
@@ -385,6 +388,11 @@ async function main() {
       req.headers["x-user-email"] = decoded.email;
       req.headers["x-user-role"] = decoded.role;
       req.headers["x-user-name"] = encodeURIComponent(decoded.name || "");
+
+      if (req.path.startsWith("/api/inventory") && decoded.role !== "ADMIN") {
+        res.status(403).json({ error: "Admin role is required", code: "FORBIDDEN" });
+        return;
+      }
 
       next();
     } catch (err) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/page-header";
 import { fetchCatalogProducts, formatVND, type ProductMeta } from "@/lib/commerce";
 import { addToCart } from "@/lib/cart";
+import { createEventStream } from "@/lib/api";
 
 export default function ProductsPage() {
   return (
@@ -36,8 +37,8 @@ function ProductsContent() {
   const [category, setCategory] = useState("Tất cả");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    fetchCatalogProducts().then((res) => {
+  const loadProducts = useCallback(() => {
+    return fetchCatalogProducts().then((res) => {
       setProductsList(res);
       setLoading(false);
       if (res.some(p => p.category === initialCategory)) {
@@ -45,6 +46,23 @@ function ProductsContent() {
       }
     });
   }, [initialCategory]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    const eventSource = createEventStream((event) => {
+      if (
+        event.type === "PRODUCT_CREATED" ||
+        event.channel === "inventory.events"
+      ) {
+        void loadProducts();
+      }
+    });
+
+    return () => eventSource.close();
+  }, [loadProducts]);
 
   const allCategories = useMemo(() => {
     return [
