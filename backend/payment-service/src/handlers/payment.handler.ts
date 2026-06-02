@@ -98,6 +98,7 @@ export function registerEventHandlers(
               transactionId,
             },
             event.correlationId,
+            { customerId },
           );
 
           await eventStore.append(successEvent);
