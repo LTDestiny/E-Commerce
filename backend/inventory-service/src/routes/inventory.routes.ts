@@ -20,6 +20,25 @@ import { config } from "../config";
 
 const realtimePublisher = new Redis(config.redis.url);
 
+async function publishProductCreatedEvent(
+  eventBus: IEventBus,
+  eventStore: IEventStore,
+  event: ProductCreatedEvent,
+) {
+  try {
+    await eventStore.append(event);
+    await eventBus.publish(EVENT_CHANNELS.PRODUCT_CREATED, event);
+  } catch (error) {
+    console.warn("[InventoryService] Product created but domain event publish failed:", error);
+  }
+
+  try {
+    await realtimePublisher.publish("inventory.events", JSON.stringify(event));
+  } catch (error) {
+    console.warn("[InventoryService] Product created but realtime broadcast failed:", error);
+  }
+}
+
 export function createInventoryRoutes(
   eventBus: IEventBus,
   eventStore: IEventStore,
@@ -122,9 +141,7 @@ export function createInventoryRoutes(
         },
       );
 
-      await eventStore.append(event);
-      await eventBus.publish(EVENT_CHANNELS.PRODUCT_CREATED, event);
-      await realtimePublisher.publish("inventory.events", JSON.stringify(event));
+      await publishProductCreatedEvent(eventBus, eventStore, event);
 
       res.status(201).json(item);
     } catch (error) {

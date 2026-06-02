@@ -9,6 +9,22 @@ import { appendStatusHistory } from "./status-history";
 import { getAllowedTransitions, statusPolicies } from "./status-policies";
 import type { AdminStatusChangeRequest, AdminStatusChangeResult } from "./status-types";
 
+function createLocalAuditId() {
+  const webCrypto = globalThis.crypto;
+  if (typeof webCrypto?.randomUUID === "function") {
+    return `local-audit-${webCrypto.randomUUID()}`;
+  }
+
+  if (typeof webCrypto?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    webCrypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `local-audit-${hex}`;
+  }
+
+  return `local-audit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export async function changeAdminStatus(request: AdminStatusChangeRequest): Promise<AdminStatusChangeResult> {
   const changedAt = new Date().toISOString();
   const allowed = getAllowedTransitions(request.entityType, request.fromStatus);
@@ -65,7 +81,7 @@ export async function changeAdminStatus(request: AdminStatusChangeRequest): Prom
       currentStatus: request.toStatus,
       changedAt,
       changedBy: request.actorName || request.actorEmail || request.actorId,
-      auditLogId: `local-audit-${crypto.randomUUID()}`,
+      auditLogId: createLocalAuditId(),
     };
 
     appendStatusHistory({
@@ -87,7 +103,7 @@ export async function changeAdminStatus(request: AdminStatusChangeRequest): Prom
     return result;
   } catch (error) {
     appendStatusHistory({
-      id: `local-audit-${crypto.randomUUID()}`,
+      id: createLocalAuditId(),
       timestamp: changedAt,
       actorId: request.actorId,
       actorName: request.actorName,

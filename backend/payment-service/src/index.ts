@@ -93,7 +93,7 @@ async function main() {
           {
             orderId: payment.orderId,
             paymentId: payment.id,
-            reason: "Payment timeout: customer did not complete payment within 5 minutes",
+            reason: "Payment timeout: customer did not complete payment within 15 minutes",
             retryable: false,
           },
           payment.idempotencyKey,
