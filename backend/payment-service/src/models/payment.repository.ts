@@ -136,6 +136,33 @@ class PaymentRepository {
     return rows.map(toPayment);
   }
 
+  async findExpiredPending(now: Date, limit = 100): Promise<Payment[]> {
+    const rows = await prisma.payment.findMany({
+      where: {
+        status: PaymentStatus.PENDING,
+        expiredAt: { lt: now },
+      },
+      orderBy: { expiredAt: "asc" },
+      take: limit,
+    });
+    return rows.map(toPayment);
+  }
+
+  async failPending(id: string): Promise<Payment | null> {
+    const result = await prisma.payment.updateMany({
+      where: {
+        id,
+        status: PaymentStatus.PENDING,
+      },
+      data: {
+        status: PaymentStatus.FAILED,
+      },
+    });
+
+    if (result.count === 0) return null;
+    return this.findById(id);
+  }
+
   async updateStatus(
     id: string,
     status: PaymentStatus,

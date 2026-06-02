@@ -28,6 +28,13 @@ export const config = {
     webhookPath:
       process.env.SEPAY_WEBHOOK_PATH || "/api/payments/sepay/webhook",
   },
+  paymentExpiration: {
+    ttlMs: parseInt(process.env.PAYMENT_EXPIRATION_MS || `${5 * 60 * 1000}`, 10),
+    scanIntervalMs: parseInt(
+      process.env.PAYMENT_EXPIRATION_SCAN_INTERVAL_MS || `${30 * 1000}`,
+      10,
+    ),
+  },
   paymentMethods: {
     defaultMethod: process.env.PAYMENT_METHOD || "SEPAY_QR",
   },

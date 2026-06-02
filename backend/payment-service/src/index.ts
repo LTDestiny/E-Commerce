@@ -8,6 +8,8 @@ import {
   RedisEventBus,
   KafkaEventBus,
   createEvent,
+  EVENT_CHANNELS,
+  PaymentFailedEvent,
   checkKafkaConnectivity,
 } from "@ecommerce/shared";
 import { config } from "./config";
@@ -15,6 +17,7 @@ import { createPaymentRoutes } from "./routes/payment.routes";
 import { registerEventHandlers } from "./handlers/payment.handler";
 import { prisma } from "./lib/prisma";
 import { PrismaEventStore } from "./lib/event-store";
+import { paymentRepository } from "./models/payment.repository";
 
 async function ensurePaymentAdminData() {
   await prisma.$executeRawUnsafe(`ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "provider" TEXT NOT NULL DEFAULT 'SEPAY'`);
@@ -73,48 +76,48 @@ async function main() {
 
   app.use("/api/payments", createPaymentRoutes(eventBus, eventStore));
 
-  // Start Payment Expiration Cron Job (runs every 5 minutes)
-  setInterval(async () => {
+  const expirePendingPayments = async () => {
     try {
       const now = new Date();
-      const expiredPayments = await prisma.payment.findMany({
-        where: {
-          status: "PENDING",
-          expiredAt: { lt: now },
-        },
-      });
+      const expiredPayments = await paymentRepository.findExpiredPending(now);
 
       for (const payment of expiredPayments) {
+        const failedPayment = await paymentRepository.failPending(payment.id);
+        if (!failedPayment) continue;
+
         console.log(`[PaymentService Cron] Failing expired payment ${payment.id} for order ${payment.orderId}`);
 
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: "FAILED" },
-        });
-
-        const failEvent = createEvent<any>(
+        const failEvent = createEvent<PaymentFailedEvent>(
           "PAYMENT_FAILED",
           config.serviceName,
           {
             orderId: payment.orderId,
             paymentId: payment.id,
-            reason: "Payment expired (expiredAt passed)",
+            reason: "Payment timeout: customer did not complete payment within 5 minutes",
             retryable: false,
           },
           payment.idempotencyKey,
           {
             provider: "SEPAY",
             status: "FAILED",
+            customerId: payment.customerId,
+            expiredAt: payment.expiredAt,
           }
         );
 
         await eventStore.append(failEvent);
-        await eventBus.publish("payment.failed", failEvent);
+        await eventBus.publish(EVENT_CHANNELS.PAYMENT_FAILED, failEvent);
       }
     } catch (e) {
       console.error("[PaymentService Cron] Error in payment expire cron job:", e);
     }
-  }, 5 * 60 * 1000);
+  };
+
+  void expirePendingPayments();
+  const paymentExpirationTimer = setInterval(
+    expirePendingPayments,
+    config.paymentExpiration.scanIntervalMs,
+  );
 
   app.get("/health", async (_req, res) => {
     try {
@@ -151,6 +154,7 @@ async function main() {
   });
 
   process.on("SIGTERM", async () => {
+    clearInterval(paymentExpirationTimer);
     await eventBus.disconnect();
     await prisma.$disconnect();
     process.exit(0);

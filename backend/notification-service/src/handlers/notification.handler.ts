@@ -184,12 +184,13 @@ export function registerEventHandlers(
 
       try {
         const { orderId, reason } = event.payload;
+        const customerId = String(event.metadata?.customerId || "customer");
         await sendNotification(
           orderId,
-          "customer",
-          NotificationType.PUSH,
+          customerId,
+          NotificationType.IN_APP,
           "Thanh toán thất bại",
-          `Thanh toán cho đơn hàng #${orderId.slice(0, 8)} thất bại: ${reason}. Vui lòng thử lại.`,
+          `Thanh toán cho đơn hàng #${orderId.slice(0, 8)} thất bại: ${reason}. Đơn hàng đã bị hủy và sản phẩm đã được hoàn lại kho.`,
           event.correlationId,
           eventBus,
           eventStore,

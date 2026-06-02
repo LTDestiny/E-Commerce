@@ -133,6 +133,7 @@ export function registerEventHandlers(
               retryable: isTransient,
             },
             event.correlationId,
+            { customerId },
           );
 
           await eventStore.append(failEvent);

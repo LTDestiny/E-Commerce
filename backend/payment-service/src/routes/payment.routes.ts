@@ -309,7 +309,7 @@ export function createPaymentRoutes(
       const activeAccount = account || config.sepay.paymentAccount;
       const transferContent = `SEPAY ${String(orderId).slice(0, 8)}`;
       const qrCode = `https://img.vietqr.io/image/${activeBankName}-${activeAccount}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(transferContent)}`;
-      const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+      const expiredAt = new Date(Date.now() + config.paymentExpiration.ttlMs);
 
       const payment = await paymentRepository.createSepay(
         String(orderId),
@@ -374,7 +374,7 @@ export function createPaymentRoutes(
         return;
       }
 
-      const expiredAt = new Date(Date.now() + 15 * 60 * 1000);
+      const expiredAt = new Date(Date.now() + config.paymentExpiration.ttlMs);
       const transferContent = `SEPAY ${order.id.slice(0, 8)}`;
       const qrCode = `https://img.vietqr.io/image/${config.sepay.bankName}-${config.sepay.paymentAccount}-compact2.png?amount=${order.totalAmount}&addInfo=${encodeURIComponent(transferContent)}`;
       const paymentLink = `https://payment.sepay.vn/t/${order.id}`;
@@ -489,6 +489,14 @@ export function createPaymentRoutes(
           req.headers,
         );
         res.json({ ok: true, message: "Duplicate callback - already completed", duplicated: true });
+        return;
+      }
+
+      if (payment.status !== PaymentStatus.PENDING) {
+        res.status(409).json({
+          error: `Payment is already ${payment.status} and cannot be updated by webhook`,
+          payment,
+        });
         return;
       }
 

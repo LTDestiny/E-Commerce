@@ -156,6 +156,7 @@ export function registerEventHandlers(
           event.correlationId,
           eventBus,
           eventStore,
+          OrderStatus.FAILED,
         );
       } catch (err) {
         console.error(`[${config.serviceName}] Order handler error:`, err);
@@ -179,6 +180,7 @@ export function registerEventHandlers(
           event.correlationId,
           eventBus,
           eventStore,
+          OrderStatus.CANCELLED,
         );
       } catch (err) {
         console.error(`[${config.serviceName}] Order handler error:`, err);
@@ -285,11 +287,8 @@ async function cancelOrder(
   correlationId: string,
   eventBus: IEventBus,
   eventStore: IEventStore,
+  status: OrderStatus = OrderStatus.CANCELLED,
 ): Promise<void> {
-  const status = reason.toLowerCase().includes("cancel")
-    ? OrderStatus.CANCELLED
-    : OrderStatus.FAILED;
-
   const order = await orderRepository.updateStatus(
     orderId,
     status,
